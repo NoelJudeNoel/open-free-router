@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>open-free-router</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🆓 open-free-router</h1>
+      <p class="subtitle">Free LLM Model Router &amp; Sync Engine</p>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="config">Config</button>
+      <button class="tab" data-tab="models">Models</button>
+    </nav>
+
+    <section id="tab-dashboard" class="tab-content">
+      <div class="card">
+        <h2>Providers</h2>
+        <div id="providers">Loading…</div>
+      </div>
+
+      <div class="card">
+        <h2>Proxy Status</h2>
+        <div id="proxy">Loading…</div>
+      </div>
+    </section>
+
+    <section id="tab-config" class="tab-content" style="display:none">
+      <div class="card">
+        <h2>Configuration Editor</h2>
+        <div class="config-note">⚠️ API keys will be masked on load. Edit carefully.</div>
+        <textarea id="config-editor" spellcheck="false"></textarea>
+        <div class="config-actions">
+          <button id="config-save" class="btn primary">Save Config</button>
+          <button id="config-reload" class="btn">Reload</button>
+          <span id="config-status" class="status-msg"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-models" class="tab-content" style="display:none">
+      <div class="card">
+        <h2>Free Models by Provider</h2>
+        <div id="models">Loading…</div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
