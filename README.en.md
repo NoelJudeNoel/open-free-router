@@ -3,11 +3,11 @@
 **One command to run everything:**
 
 ```bash
-pip install open-free-router
+bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
 open-free-router serve   ← starts proxy(8337) + UI(9057) + scheduler
 ```
 
-Tracks free models across multiple LLM providers (OpenRouter, NVIDIA NIM, OpenCode Zen, StepFun, SenseNova), runs a local proxy routing by model ID to the correct upstream, and auto-refreshes the model list.
+Tracks free models across multiple LLM providers (OpenRouter, NVIDIA NIM, OpenCode Zen, StepFun, SenseNova, Nous Research), runs a local proxy routing by model ID to the correct upstream, and auto-refreshes the model list.
 
 ## Install
 

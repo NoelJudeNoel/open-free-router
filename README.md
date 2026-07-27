@@ -3,11 +3,11 @@
 **一条命令跑起所有服务：**
 
 ```bash
-pip install open-free-router
+bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
 open-free-router serve   ← 启动 proxy(8337) + UI(9057) + 定时刷新
 ```
 
-追踪多个 LLM 提供商（OpenRouter、NVIDIA NIM、OpenCode Zen、StepFun、SenseNova）的免费模型，运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表。
+追踪多个 LLM 提供商（OpenRouter、NVIDIA NIM、OpenCode Zen、StepFun、SenseNova、Nous Research）的免费模型，运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表。
 
 ## 安装
 
