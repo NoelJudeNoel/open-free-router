@@ -1,10 +1,7 @@
-"""Free model proxy — local HTTP proxy that filters out non-free models.
+"""Free model proxy — single port, routes by model ID to upstream provider.
 
-Runs two ports:
-  - OpenRouter free-only (default 8337)
-  - OpenCode Zen free-only (default 8338)
-
-Used by agents that auto-expand full model lists (Hermes, OpenCode).
+GET  /v1/models           → all free models from registry
+POST /v1/chat/completions → forward to the correct upstream by model ID
 """
 from __future__ import annotations
 
@@ -16,70 +13,27 @@ from typing import ClassVar
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
-from open_free_router.registry import ProviderConfig, ModelInfo, Registry
+from open_free_router.registry import Registry
 
 
 class _ProxyHandler(BaseHTTPRequestHandler):
-    """Per-port proxy handler. Class attrs set by run_proxy()."""
-
     registry: Registry | None = None
-    provider_name: str = ""
-    upstream_url: str = ""
-    api_key: str = ""
-    _meta_cache: ClassVar[dict] = {}
-    _meta_lock: ClassVar[threading.Lock] = threading.Lock()
-    _fetching: ClassVar[bool] = False
-
-    def _whitelist(self) -> set[str]:
-        if not self.registry:
-            return set()
-        p = self.registry.get(self.provider_name)
-        return p.free_model_ids() if p else set()
+    _model_index: ClassVar[dict[str, str]] = {}  # model_id → provider_name
+    _index_lock: ClassVar[threading.Lock] = threading.Lock()
 
     @classmethod
-    def _bg_fetch(cls, upstream: str, key: str):
-        if cls._fetching:
-            return
-        cls._fetching = True
-        def _work():
-            try:
-                url = f"{upstream.rstrip('/')}/v1/models"
-                req = Request(url, headers={"Authorization": f"Bearer {key}"})
-                with urlopen(req, timeout=30) as r:
-                    data = json.loads(r.read())
-                with cls._meta_lock:
-                    for m in data.get("data", []):
-                        cls._meta_cache[m["id"]] = m
-            except Exception:
-                pass
-            finally:
-                cls._fetching = False
-        threading.Thread(target=_work, daemon=True).start()
+    def rebuild_index(cls):
+        idx = {}
+        if cls.registry:
+            for name, p in cls.registry.providers.items():
+                for m in p.models:
+                    idx[m.id] = name
+        with cls._index_lock:
+            cls._model_index = idx
 
-    def _models_json(self) -> bytes:
-        wl = self._whitelist()
-        upstream = self.upstream_url
-        key = self.api_key
-
-        # Trigger async metadata fetch
-        if not self._meta_cache and upstream and key:
-            self._bg_fetch(upstream, key)
-
-        items = []
-        with self._meta_lock:
-            cache = dict(self._meta_cache)
-        for mid in sorted(wl):
-            meta = cache.get(mid, {})
-            items.append({
-                "id": mid,
-                "object": "model",
-                "created": meta.get("created", 0),
-                "owned_by": meta.get("owned_by", "open-free-router"),
-                "pricing": meta.get("pricing", {"prompt": "0", "completion": "0"}),
-                "context_length": meta.get("context_length"),
-                "architecture": meta.get("architecture", {}),
-            })
-        return json.dumps({"object": "list", "data": items}).encode()
+    def _find_provider(self, model_id: str) -> str | None:
+        with self._index_lock:
+            return self._model_index.get(model_id)
 
     def _send_json(self, code: int, obj: dict):
         body = json.dumps(obj).encode()
@@ -93,17 +47,9 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         from urllib.parse import urlparse
         path = urlparse(self.path).path
         if path == "/v1/models":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(self._models_json())
+            self._handle_list_models()
             return
-        # pass-through
-        status, body = self._proxy(self.path)
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
         from urllib.parse import urlparse
@@ -112,84 +58,95 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode()
 
         if path == "/v1/chat/completions":
-            try:
-                req = json.loads(body)
-            except json.JSONDecodeError:
-                self._send_json(400, {"error": "invalid json"})
-                return
-            wl = self._whitelist()
-            if req.get("model") not in wl:
-                self._send_json(403, {
-                    "error": {
-                        "message": f"Model '{req.get('model')}' not in free whitelist.",
-                        "type": "proxy_error",
-                    }
+            self._handle_chat_completion(body)
+            return
+        self._send_json(404, {"error": "not found"})
+
+    def _handle_list_models(self):
+        if not self.registry:
+            self._send_json(200, {"object": "list", "data": []})
+            return
+        items = []
+        for name, p in self.registry.providers.items():
+            for m in p.models:
+                items.append({
+                    "id": m.id,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": name,
                 })
-                return
-            status, resp = self._proxy(self.path, body)
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(resp)
+        self._send_json(200, {"object": "list", "data": items})
+
+    def _handle_chat_completion(self, body: str):
+        try:
+            req = json.loads(body)
+        except json.JSONDecodeError:
+            self._send_json(400, {"error": "invalid json"})
             return
 
-        status, resp = self._proxy(self.path, body)
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(resp)
+        model_id = req.get("model", "")
+        provider_name = self._find_provider(model_id)
+        if not provider_name:
+            self._send_json(403, {
+                "error": {
+                    "message": f"Model '{model_id}' not in free whitelist.",
+                    "type": "proxy_error",
+                }
+            })
+            return
 
-    def _proxy(self, path: str, body: str | None = None) -> tuple[int, bytes]:
-        upstream = self.upstream_url
-        key = self.api_key
-        clean = path.lstrip("/")
-        if clean.startswith("v1/"):
-            clean = clean[3:]
-        url = f"{upstream.rstrip('/')}/{clean}"
+        p = self.registry.get(provider_name) if self.registry else None
+        if not p or not (p.upstream_url or p.base_url):
+            self._send_json(502, {"error": "provider not configured"})
+            return
+
+        upstream = (p.upstream_url or p.base_url).rstrip("/")
+        key = p.effective_key
+        url = f"{upstream}/chat/completions"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {key}",
         }
-        data = body.encode() if body else None
-        req = Request(url, data=data, headers=headers, method="POST" if body else "GET")
+        data = body.encode()
         try:
-            with urlopen(req, timeout=120) as r:
-                return r.status, r.read()
+            req_out = Request(url, data=data, headers=headers, method="POST")
+            with urlopen(req_out, timeout=120) as r:
+                resp = r.read()
+                self.send_response(r.status)
+                for k, v in r.headers.items():
+                    if k.lower() in ("content-type", "content-length"):
+                        self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(resp)
         except URLError as e:
             code = getattr(e, "code", 502)
-            payload = getattr(e, "read", lambda: b"")() or json.dumps({"error": str(e.reason)}).encode()
-            return code, payload
+            raw = getattr(e, "read", lambda: b"")()
+            if raw:
+                try:
+                    self._send_json(code, json.loads(raw))
+                except json.JSONDecodeError:
+                    self._send_json(code, {"error": raw.decode("utf-8", errors="replace")})
+            else:
+                self._send_json(code, {"error": str(e.reason)})
         except Exception as e:
-            return 502, json.dumps({"error": str(e)}).encode()
+            self._send_json(502, {"error": str(e)})
 
     def log_message(self, format, *args):
-        pass  # silence
+        pass
 
 
-def run_proxy(registry: Registry, host: str = "127.0.0.1", openrouter_port: int = 8337, zen_port: int = 8338):
-    """Start proxy servers for all providers that need filtering."""
-    servers = []
+def run_proxy(registry: Registry, host: str = "127.0.0.1", port: int = 8337):
+    handler = type("Handler", (_ProxyHandler,), {
+        "registry": registry,
+    })
+    handler.rebuild_index()
+    srv = HTTPServer((host, port), handler)
+    print(f"  Proxy  : {host}:{port} (single-port, model-ID routing)")
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    return srv, handler
 
-    mapping = {
-        "openrouter": openrouter_port,
-        "opencode-zen-free": zen_port,
-    }
 
-    for pname, port in mapping.items():
-        p = registry.get(pname)
-        if not p or not p.base_url:
-            continue
-
-        handler = type("Handler", (_ProxyHandler,), {
-            "registry": registry,
-            "provider_name": pname,
-            "upstream_url": p.upstream_url or p.base_url,
-            "api_key": p.effective_key,
-        })
-        srv = HTTPServer((host, port), handler)
-        t = threading.Thread(target=srv.serve_forever, daemon=True)
-        t.start()
-        servers.append((pname, port, srv))
-        print(f"  Proxy {pname}: {host}:{port} → {p.upstream_url or p.base_url}")
-
-    return servers
+def rebuild_proxy_index():
+    """Rebuild the model-ID → provider reverse index."""
+    _ProxyHandler.rebuild_index()

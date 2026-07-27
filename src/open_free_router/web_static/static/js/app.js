@@ -9,6 +9,7 @@ document.querySelectorAll('.tab').forEach(btn => {
     $('tab-' + btn.dataset.tab).style.display = 'block';
     if (btn.dataset.tab === 'config') loadConfig();
     if (btn.dataset.tab === 'models') loadModels();
+    if (btn.dataset.tab === 'providers') loadProviders();
   });
 });
 
@@ -23,11 +24,85 @@ async function loadStatus() {
       <div class="pmeta">${p.auto_refresh ? 'auto-refresh' : 'manual'}</div>
     </div>
   `).join('') || '<div class="status-line">No providers configured</div>';
-
-  $('proxy').innerHTML = Object.entries(data.proxy).map(([k, v]) =>
-    `<div class="status-line">${k}: http://${v}</div>`
-  ).join('');
 }
+
+// Actions
+async function doAction(path, label) {
+  const el = $('action-status');
+  el.textContent = 'Running…';
+  el.style.color = '#eab308';
+  try {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const data = await r.json();
+    if (r.ok && data.ok) {
+      el.textContent = `${label}: ${JSON.stringify(data.results || data)}`;
+      el.style.color = '#22c55e';
+      loadStatus();
+      loadProviders();
+      loadModels();
+    } else {
+      throw new Error(data.error || 'failed');
+    }
+  } catch (e) {
+    el.textContent = `${label} failed: ${e.message}`;
+    el.style.color = '#ef4444';
+  }
+}
+
+$('refresh-all').addEventListener('click', () => doAction('/api/refresh', 'Refresh'));
+
+// Providers
+async function loadProviders() {
+  const r = await fetch('/api/providers');
+  const data = await r.json();
+  const el = $('provider-list');
+  if (!data.providers.length) {
+    el.innerHTML = '<div class="status-line">No providers configured</div>';
+    return;
+  }
+  el.innerHTML = data.providers.map(p => `
+    <div class="card provider-card">
+      <div class="provider-header">
+        <div>
+          <div class="pname">${p.name}</div>
+          <div class="pmeta">${p.base_url || p.upstream_url}</div>
+        </div>
+        <div class="badge ${p.auto_refresh ? 'ok' : 'manual'}">${p.auto_refresh ? 'auto' : 'manual'}</div>
+      </div>
+      <div class="provider-meta">API key: ${p.api_key || 'empty'}</div>
+      <div class="provider-meta">${p.model_count} models</div>
+      <details>
+        <summary>Models</summary>
+        <div class="model-grid">
+          ${p.models.map(m => `<div class="model-card"><div class="mid">${m.id}</div></div>`).join('')}
+        </div>
+      </details>
+    </div>
+  `).join('');
+}
+
+$('provider-add').addEventListener('click', async () => {
+  const name = prompt('Provider name:');
+  if (!name) return;
+  const base_url = prompt('Base URL:');
+  if (!base_url) return;
+  const api_key = prompt('API key (leave empty if none):') || '';
+  const models_raw = prompt('Comma-separated model IDs (leave empty to fetch later):') || '';
+  const models = models_raw.split(',').map(s => s.trim()).filter(Boolean);
+  const body = { name, base_url, api_key, models, auto_refresh: !!api_key };
+  const r = await fetch('/api/providers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (r.ok) {
+    alert(`Added provider ${name} with ${data.models} models`);
+    loadProviders();
+  } else {
+    alert('Failed: ' + (data.error || 'unknown'));
+  }
+});
 
 // Models
 async function loadModels() {

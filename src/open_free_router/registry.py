@@ -115,13 +115,17 @@ class Registry:
     @classmethod
     def load(cls, path: Path) -> "Registry":
         import yaml
-        with open(path) as f:
-            data = yaml.safe_load(f) or {}
+        try:
+            with open(path) as f:
+                data = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            data = {}
         return cls(data)
 
     def save(self, path: Path):
         import shutil, datetime
         import yaml
+        path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             backup = path.with_suffix(f".yaml.bak-{datetime.datetime.now():%Y%m%d-%H%M%S}")
             shutil.copy2(path, backup)

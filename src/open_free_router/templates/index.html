@@ -15,19 +15,33 @@
 
     <nav class="tabs">
       <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="providers">Providers</button>
       <button class="tab" data-tab="config">Config</button>
       <button class="tab" data-tab="models">Models</button>
     </nav>
 
     <section id="tab-dashboard" class="tab-content">
       <div class="card">
-        <h2>Providers</h2>
-        <div id="providers">Loading…</div>
+        <h2>Actions</h2>
+        <div class="actions">
+         <button id="refresh-all" class="btn primary">Refresh All Models</button>
+         <span id="action-status" class="status-msg"></span>
+        </div>
       </div>
 
+       <div class="card">
+         <h2>Providers</h2>
+         <div id="providers">Loading…</div>
+       </div>
+    </section>
+
+    <section id="tab-providers" class="tab-content" style="display:none">
       <div class="card">
-        <h2>Proxy Status</h2>
-        <div id="proxy">Loading…</div>
+        <h2>Providers</h2>
+        <div id="provider-list">Loading…</div>
+        <div class="config-actions">
+          <button id="provider-add" class="btn">Add Provider</button>
+        </div>
       </div>
     </section>
 

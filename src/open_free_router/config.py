@@ -13,7 +13,7 @@ DEFAULT_CONFIG_PATHS = [
 
 
 class Config:
-    """Central config: registry path, proxy ports, agent paths, API keys."""
+    """Central config: registry path, proxy host/port, UI host/port."""
 
     def __init__(self, config_path: Optional[Path] = None):
         self._raw = {}
@@ -28,25 +28,16 @@ class Config:
         # registry.yaml (single source of truth for providers + models)
         self.registry_path = Path(self._raw.get("registry", "registry.yaml"))
         if not self.registry_path.is_absolute():
-            self.registry_path = (self.path.parent if self.path else Path.cwd()) / self.registry_path
+            base = self.path.parent if self.path else Path.home() / ".config" / "open-free-router"
+            self.registry_path = base / self.registry_path
 
         # proxy
-        self.proxy_openrouter_port = int(self._raw.get("proxy", {}).get("openrouter_port", 8337))
-        self.proxy_zen_port = int(self._raw.get("proxy", {}).get("zen_port", 8338))
         self.proxy_host = self._raw.get("proxy", {}).get("host", "127.0.0.1")
+        self.proxy_port = int(self._raw.get("proxy", {}).get("port", 8337))
 
         # ui
         self.ui_host = self._raw.get("ui", {}).get("host", "127.0.0.1")
-        self.ui_port = int(self._raw.get("ui", {}).get("port", 9527))
-
-        # agent config paths (for sync)
-        agent_paths = self._raw.get("agents", {})
-        self.agent_paths = {
-            "hermes": Path(agent_paths.get("hermes", Path.home() / ".hermes" / "config.yaml")),
-            "pi": Path(agent_paths.get("pi", Path.home() / ".pi" / "agent" / "models.json")),
-            "omp": Path(agent_paths.get("omp", Path.home() / ".omp" / "agent" / "models.yml")),
-            "opencode": Path(agent_paths.get("opencode", Path.home() / ".config" / "opencode" / "opencode.jsonc")),
-        }
+        self.ui_port = int(self._raw.get("ui", {}).get("port", 9057))
 
     @staticmethod
     def _find_config() -> Optional[Path]:
@@ -54,10 +45,6 @@ class Config:
             if p.exists():
                 return p
         return None
-
-    @property
-    def is_configured(self) -> bool:
-        return self.path is not None and self.path.exists()
 
     @property
     def data_dir(self) -> Path:

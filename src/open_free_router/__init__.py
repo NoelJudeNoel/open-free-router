@@ -1,16 +1,9 @@
-"""open-free-router — Free LLM Model Router & Sync Engine
-
-A lightweight system that:
-- Tracks free models across multiple LLM providers (OpenRouter, NIM, Zen, etc.)
-- Runs a local proxy that filters out paid models (ports 8337/8338)
-- Auto-syncs the free model list to Hermes, Pi, OMP, OpenCode
-- Provides a web dashboard for monitoring and management
+"""open-free-router — Free LLM Model Router & Pipeline
 
 Quick start:
-    cp config.example.yaml ~/.config/open-free-router/config.yaml
-    # Edit config.yaml to add your providers and API keys
-    open-free-router proxy   # starts proxy on 8337/8338
-    open-free-router ui      # starts web dashboard on 9527
-    open-free-router refresh # refresh free model lists
-    open-free-router sync    # sync to all agents
+    pip install open-free-router
+    open-free-router serve   # starts proxy (8337) + UI (9057) + scheduler (12h refresh)
+    open-free-router ui      # standalone web dashboard
+    open-free-router refresh # one-time free model list refresh
+    open-free-router add     # add a provider
 """

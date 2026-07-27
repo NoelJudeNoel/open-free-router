@@ -7,7 +7,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 from open_free_router.config import Config
-from open_free_router.registry import Registry
+from open_free_router.registry import ModelInfo, ProviderConfig, Registry
+from open_free_router.proxy import rebuild_proxy_index
+
+PI_MODELS_PATH = Path.home() / ".pi" / "agent" / "models.json"
 
 
 class _UIHandler(BaseHTTPRequestHandler):
@@ -28,12 +31,18 @@ class _UIHandler(BaseHTTPRequestHandler):
             self._api_models()
         elif self.path == "/api/config":
             self._api_config_get()
+        elif self.path == "/api/providers":
+            self._api_providers()
         else:
             self.send_error(404)
 
     def do_POST(self):
         if self.path == "/api/config":
             self._api_config_post()
+        elif self.path == "/api/refresh":
+            self._api_refresh()
+        elif self.path == "/api/providers":
+            self._api_providers_post()
         else:
             self.send_error(404)
 
@@ -53,10 +62,6 @@ class _UIHandler(BaseHTTPRequestHandler):
 
     def _api_status(self):
         status = {
-            "proxy": {
-                "openrouter": f"{self.cfg.proxy_host}:{self.cfg.proxy_openrouter_port}",
-                "zen": f"{self.cfg.proxy_host}:{self.cfg.proxy_zen_port}",
-            },
             "providers": [],
         }
         for name, p in (self.reg.providers if self.reg else {}).items():
@@ -91,7 +96,6 @@ class _UIHandler(BaseHTTPRequestHandler):
         try:
             data = json.loads(body)
             yaml_text = data.get("yaml", "")
-            # Basic sanity check
             import yaml
             parsed = yaml.safe_load(yaml_text)
             if not isinstance(parsed, dict):
@@ -101,6 +105,115 @@ class _UIHandler(BaseHTTPRequestHandler):
             return
         self.config_path.write_text(yaml_text)
         self._send_json(200, {"ok": True, "saved": str(self.config_path)})
+
+    def _mask_key(self, key: str) -> str:
+        if not key:
+            return ""
+        return f"{key[:8]}...{key[-4:]}" if len(key) > 12 else "***"
+
+    def _api_providers(self):
+        if not self.reg:
+            self._send_json(200, {"providers": []})
+            return
+        providers = []
+        for name, p in self.reg.providers.items():
+            providers.append({
+                "name": name,
+                "base_url": p.base_url,
+                "upstream_url": p.upstream_url or "",
+                "api_key": self._mask_key(p.effective_key),
+                "auto_refresh": p.auto_refresh,
+                "refresh_method": p.refresh_method,
+                "model_count": len(p.models),
+                "models": [m.to_dict() for m in p.models],
+            })
+        self._send_json(200, {"providers": providers})
+
+    def _api_refresh(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length) if length else b"{}"
+        try:
+            data = json.loads(body)
+        except Exception:
+            data = {}
+        provider_name = data.get("provider")
+        from open_free_router.refresh import refresh
+        results = refresh(self.reg, provider_name=provider_name)
+        changed = any(v for v in results.values())
+        if changed:
+            assert self.reg is not None
+            assert self.cfg is not None
+            self.reg.save(self.cfg.registry_path)
+        rebuild_proxy_index()
+        self._write_pi_models()
+        self._send_json(200, {"ok": True, "results": results, "saved": changed})
+
+    def _api_providers_post(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            data = json.loads(body)
+        except Exception as e:
+            self._send_json(400, {"error": f"invalid json: {e}"})
+            return
+        if not self.reg or not self.cfg:
+            self._send_json(500, {"error": "server not initialized"})
+            return
+        name = data.get("name", "").strip()
+        if not name:
+            self._send_json(400, {"error": "name is required"})
+            return
+        existing = self.reg.get(name)
+        api_key = data.get("api_key", existing.api_key if existing else "")
+        base_url = data.get("base_url", existing.base_url if existing else "")
+        upstream_url = data.get("upstream_url", existing.upstream_url if existing else "")
+        models_raw = data.get("models", [])
+        models = []
+        for m in models_raw:
+            if isinstance(m, str):
+                models.append(ModelInfo(id=m))
+            elif isinstance(m, dict):
+                models.append(ModelInfo(
+                    id=m.get("id", ""),
+                    name=m.get("name", m.get("id", "")),
+                    context_window=int(m.get("context_window", 131072) or 131072),
+                    max_tokens=int(m.get("max_tokens", 8192) or 8192),
+                    reasoning=bool(m.get("reasoning", False)),
+                ))
+        p = ProviderConfig(
+            name=name,
+            base_url=base_url,
+            upstream_url=upstream_url,
+            api_key=api_key,
+            models=models,
+            auto_refresh=bool(data.get("auto_refresh", False)),
+            refresh_method=data.get("refresh_method", "api" if data.get("auto_refresh") else "manual"),
+        )
+        self.reg.add_provider(p)
+        self.reg.save(self.cfg.registry_path)
+        rebuild_proxy_index()
+        self._write_pi_models()
+        self._send_json(200, {"ok": True, "provider": name, "models": len(models)})
+
+    def _write_pi_models(self):
+        if not PI_MODELS_PATH.parent.exists():
+            return
+        if not self.reg:
+            return
+        try:
+            models = []
+            for p in self.reg.providers.values():
+                for m in p.models:
+                    models.append({
+                        "id": m.id,
+                        "name": m.name or m.id,
+                        "context_window": m.context_window,
+                        "max_tokens": m.max_tokens,
+                        "reasoning": m.reasoning,
+                    })
+            PI_MODELS_PATH.write_text(json.dumps(models, indent=2, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     def _send_json(self, code: int, obj: dict):
         body = json.dumps(obj, indent=2).encode()
@@ -114,10 +227,9 @@ class _UIHandler(BaseHTTPRequestHandler):
         pass
 
 
-def run_ui(cfg: Config, port: int = 9527):
+def run_ui(cfg: Config, port: int = 9527, reg: Registry | None = None):
     _UIHandler.cfg = cfg
-    reg = Registry.load(cfg.registry_path)
-    _UIHandler.reg = reg
+    _UIHandler.reg = reg or Registry.load(cfg.registry_path)
     _UIHandler.config_path = cfg.path
     srv = HTTPServer((cfg.ui_host, port), _UIHandler)
     print(f"🌐 Dashboard: http://{cfg.ui_host}:{port}")

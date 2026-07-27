@@ -1,0 +1,89 @@
+deepseek:
+  upstream_url: https://api.deepseek.com/v1
+  auto_refresh: false
+  refresh_method: manual
+  api_key: ''
+  models:
+  - id: deepseek-chat
+  - id: deepseek-reasoner
+google-ai-studio:
+  upstream_url: https://generativelanguage.googleapis.com/v1beta
+  auto_refresh: false
+  refresh_method: manual
+  api_key: ''
+  models:
+  - id: gemini-2.5-flash
+  - id: gemini-2.5-flash-lite
+  - id: gemini-2.5-pro
+groq:
+  upstream_url: https://api.groq.com/openai/v1
+  auto_refresh: false
+  refresh_method: manual
+  api_key: ''
+  models:
+  - id: llama-3.3-70b-versatile
+  - id: llama-3.1-8b-instant
+  - id: gemma2-9b-it
+  - id: mixtral-8x7b-32768
+nvidia-nim:
+  upstream_url: https://integrate.api.nvidia.com/v1
+  auto_refresh: false
+  refresh_method: manual
+  api_key: ''
+  models:
+  - id: minimaxai/minimax-m3
+  - id: nvidia/nemotron-3-ultra-550b-a55b
+  - id: stepfun-ai/step-3.7-flash
+  - id: z-ai/glm-5.2
+nous:
+  upstream_url: https://inference-api.nousresearch.com/v1
+  auto_refresh: false
+  refresh_method: manual
+  api_key: ''
+  models:
+  - id: inclusionai/ling-3.0-flash:free
+  - id: poolside/laguna-s-2.1:free
+  - id: poolside/laguna-xs-2.1:free
+  - id: stepfun/step-3.7-flash:free
+  - id: tencent/hy3:free
+opencode-zen-free:
+  upstream_url: https://opencode.ai/zen/v1
+  auto_refresh: false
+  refresh_method: zen_docs
+  api_key: ''
+  models:
+  - id: big-pickle
+  - id: mimo-v2.5-free
+  - id: north-mini-code-free
+  - id: nemotron-3-ultra-free
+  - id: deepseek-v4-flash-free
+openrouter:
+  upstream_url: https://openrouter.ai/api/v1
+  auto_refresh: true
+  refresh_method: openrouter_api
+  api_key: ''
+  models:
+  - id: nvidia/nemotron-3-ultra-550b-a55b:free
+  - id: inclusionai/ling-3.0-flash:free
+  - id: google/gemma-4-26b-a4b-it:free
+  - id: google/gemma-4-31b-it:free
+  - id: nvidia/nemotron-3-super-120b-a12b:free
+  - id: cohere/north-mini-code:free
+  - id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+  - id: nvidia/nemotron-3-nano-30b-a3b:free
+  - id: openai/gpt-oss-20b:free
+sensenova:
+  upstream_url: https://token.sensenova.cn/v1
+  auto_refresh: false
+  refresh_method: manual
+  api_key: ''
+  models:
+  - id: deepseek-v4-flash
+  - id: glm-5.2
+stepfun:
+  upstream_url: https://api.stepfun.com/step_plan/v1
+  auto_refresh: false
+  refresh_method: manual
+  api_key: ''
+  models:
+  - id: step-3.7-flash
