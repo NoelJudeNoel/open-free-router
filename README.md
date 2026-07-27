@@ -14,6 +14,52 @@
 
 open-free-router 用一份 `registry.yaml` + 本地代理 + 同步引擎解决所有问题。
 
+## 给你的 Agent 一键安装
+
+把下面这行直接发给你的 Agent，它会自动完成安装、配置、启动：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
+```
+
+安装完成后，Agent 会继续执行：
+
+```bash
+# 1. 添加 OpenRouter provider（替换成你的 API key）
+open-free-router add openrouter \
+  --base-url https://openrouter.ai/api/v1 \
+  --api-key sk-or-你的key \
+  --model nvidia/nemotron-3-ultra-550b-a55b:free \
+  --auto-refresh
+
+# 2. 启动 proxy（后台运行）
+open-free-router proxy &
+
+# 3. 启动 web 控制台（后台运行）
+open-free-router ui &
+
+# 4. 刷新模型列表 + 同步到所有 agent
+open-free-router refresh
+open-free-router sync
+```
+
+### 如果 Agent 无法直接执行 curl
+
+先手动克隆：
+
+```bash
+git clone https://github.com/NoelJudeNoel/open-free-router.git ~/.local/open-free-router
+cd ~/.local/open-free-router
+bash scripts/install.sh
+```
+
+### 一行命令安装到其他机器
+
+```bash
+# SSH 到远程机器后执行
+bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
+```
+
 ## 核心设计
 
 ```
@@ -171,54 +217,8 @@ agents:
 
 ```bash
 curl http://127.0.0.1:8337/v1/chat/completions \
-  -H "Authorization: Bearer any-key" \
+  -H "Authorization: Bearer ***" \
   -d '{"model":"nvidia/nemotron-3-ultra-550b-a55b:free","messages":[{"role":"user","content":"hi"}]}'
-```
-
-## 给你的 Agent 一键安装
-
-把下面这行直接发给你的 Agent，它会自动完成安装、配置、启动：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
-```
-
-安装完成后，Agent 会继续执行：
-
-```bash
-# 1. 添加 OpenRouter provider（替换成你的 API key）
-open-free-router add openrouter \
-  --base-url https://openrouter.ai/api/v1 \
-  --api-key sk-or-你的key \
-  --model nvidia/nemotron-3-ultra-550b-a55b:free \
-  --auto-refresh
-
-# 2. 启动 proxy（后台运行）
-open-free-router proxy &
-
-# 3. 启动 web 控制台（后台运行）
-open-free-router ui &
-
-# 4. 刷新模型列表 + 同步到所有 agent
-open-free-router refresh
-open-free-router sync
-```
-
-### 如果 Agent 无法直接执行 curl
-
-先手动克隆：
-
-```bash
-git clone https://github.com/NoelJudeNoel/open-free-router.git ~/.local/open-free-router
-cd ~/.local/open-free-router
-bash scripts/install.sh
-```
-
-### 一行命令安装到其他机器
-
-```bash
-# SSH 到远程机器后执行
-bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
 ```
 
 ## 运行环境
