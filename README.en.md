@@ -32,7 +32,7 @@ open-free-router solves all three with a single `registry.yaml` + local proxy + 
 ## Install
 
 ```bash
-git clone https://github.com/YOU/open-free-router.git
+git clone https://github.com/NoelJudeNoel/open-free-router.git
 cd open-free-router
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .

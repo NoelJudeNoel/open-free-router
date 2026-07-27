@@ -38,10 +38,10 @@ open-free-router 用一份 `registry.yaml` + 本地代理 + 同步引擎解决�
 
 ```bash
 # 一行命令安装
-bash <(curl -fsSL https://raw.githubusercontent.com/YOU/open-free-router/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
 
 # 或手动安装
-git clone https://github.com/YOU/open-free-router.git ~/.local/open-free-router
+git clone https://github.com/NoelJudeNoel/open-free-router.git ~/.local/open-free-router
 cd ~/.local/open-free-router
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
@@ -173,6 +173,52 @@ agents:
 curl http://127.0.0.1:8337/v1/chat/completions \
   -H "Authorization: Bearer any-key" \
   -d '{"model":"nvidia/nemotron-3-ultra-550b-a55b:free","messages":[{"role":"user","content":"hi"}]}'
+```
+
+## 给你的 Agent 一键安装
+
+把下面这行直接发给你的 Agent，它会自动完成安装、配置、启动：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
+```
+
+安装完成后，Agent 会继续执行：
+
+```bash
+# 1. 添加 OpenRouter provider（替换成你的 API key）
+open-free-router add openrouter \
+  --base-url https://openrouter.ai/api/v1 \
+  --api-key sk-or-你的key \
+  --model nvidia/nemotron-3-ultra-550b-a55b:free \
+  --auto-refresh
+
+# 2. 启动 proxy（后台运行）
+open-free-router proxy &
+
+# 3. 启动 web 控制台（后台运行）
+open-free-router ui &
+
+# 4. 刷新模型列表 + 同步到所有 agent
+open-free-router refresh
+open-free-router sync
+```
+
+### 如果 Agent 无法直接执行 curl
+
+先手动克隆：
+
+```bash
+git clone https://github.com/NoelJudeNoel/open-free-router.git ~/.local/open-free-router
+cd ~/.local/open-free-router
+bash scripts/install.sh
+```
+
+### 一行命令安装到其他机器
+
+```bash
+# SSH 到远程机器后执行
+bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
 ```
 
 ## 运行环境

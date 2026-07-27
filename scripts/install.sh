@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # install.sh — One-liner: git clone && install && config && start
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/YOU/open-free-router/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh | bash
 # Or:
-#   bash install.sh [--github-url https://github.com/YOU/open-free-router.git]
+#   bash install.sh [--github-url https://github.com/NoelJudeNoel/open-free-router.git]
 
 set -euo pipefail
 
-REPO_URL="${1:-https://github.com/YOU/open-free-router.git}"
+REPO_URL="${1:-https://github.com/NoelJudeNoel/open-free-router.git}"
 INSTALL_DIR="${OPEN_FREE_ROUTER_HOME:-$HOME/.local/open-free-router}"
 CONFIG_DIR="${OPEN_FREE_ROUTER_CONFIG_HOME:-$HOME/.config/open-free-router}"
 PYTHON="${OPEN_FREE_ROUTER_PYTHON:-python3}"
