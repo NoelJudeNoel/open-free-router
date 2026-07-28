@@ -9,7 +9,7 @@ import signal
 import sys
 from pathlib import Path
 
-from open_free_router.config import Config
+from open_free_router.config import Config, _PI_PROVIDER_NAMES
 from open_free_router.registry import Registry
 from open_free_router.proxy import run_proxy, rebuild_proxy_index
 from open_free_router.ui import run_ui
@@ -24,7 +24,7 @@ def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/
 
     Pi expects {providers: {name: {baseUrl, models: [...]}}}
     All providers point to the local single-port proxy; routing is by model ID.
-    Model IDs are prefixed with provider name (e.g. nvidia-nim/z-ai/glm-5.2)
+    Model IDs are prefixed with provider name (e.g. nv/glm-5.2)
     so users can distinguish which upstream provides the model.
     """
     if not PI_MODELS_PATH.parent.exists():
@@ -32,7 +32,8 @@ def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/
     try:
         providers = {}
         for name, p in reg.providers.items():
-            providers[name] = {
+            pi_name = _PI_PROVIDER_NAMES.get(name, name)
+            providers[pi_name] = {
                 "baseUrl": proxy_base_url,
                 "models": [
                     {

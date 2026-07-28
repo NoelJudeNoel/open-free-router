@@ -6,7 +6,7 @@ import json
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-from open_free_router.config import Config
+from open_free_router.config import Config, _PI_PROVIDER_NAMES
 from open_free_router.registry import ModelInfo, ProviderConfig, Registry
 from open_free_router.proxy import rebuild_proxy_index
 
@@ -204,7 +204,8 @@ class _UIHandler(BaseHTTPRequestHandler):
             proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1" if self.cfg else "http://127.0.0.1:8337/v1"
             providers = {}
             for name, p in self.reg.providers.items():
-                providers[name] = {
+                pi_name = _PI_PROVIDER_NAMES.get(name, name)
+                providers[pi_name] = {
                     "baseUrl": proxy_url,
                     "models": [
                         {

@@ -11,6 +11,13 @@ DEFAULT_CONFIG_PATHS = [
     Path.cwd() / "config.yaml",
 ]
 
+# PI Telegram expects certain provider names in models.json.
+# Map registry provider names → PI-compatible names.
+_PI_PROVIDER_NAMES: dict[str, str] = {
+    "openrouter": "local-free",
+    "groq": "local-groq",
+}
+
 
 class Config:
     """Central config: registry path, proxy host/port, UI host/port."""

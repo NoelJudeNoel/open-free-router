@@ -40,7 +40,7 @@ def test_write_pi_models_creates_correct_format(tmp_path):
             assert "contextWindow" in m
             assert "maxTokens" in m
 
-    assert data["providers"]["openrouter"]["models"][0]["id"] == "or/m1:free"
+    assert data["providers"]["local-free"]["models"][0]["id"] == "or/m1:free"
     assert data["providers"]["deepseek"]["models"][0]["id"] == "ds/deepseek-chat"
 
 
