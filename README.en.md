@@ -89,6 +89,8 @@ First `serve` auto-creates config + registry from defaults — no manual setup n
 ### Design Principles
 
 - **Single port 8337** — all agents point to one base_url; routing by model ID
+- **Multi-threaded** — ThreadingHTTPServer, no head-of-line blocking
+- **User-Agent** — upstream requests set `open-free-router/0.1` to avoid Cloudflare 1010 blocks
 - **Zero web framework** — uses stdlib `http.server`, no Flask/FastAPI
 - **Pluggable refresh sources** — one module per provider in `refresh_sources/`, exports `fetch(base_url, api_key) → list[ModelInfo]`
 - **Auto Pi sync** — writes `~/.pi/agent/models.json` when Pi config dir exists

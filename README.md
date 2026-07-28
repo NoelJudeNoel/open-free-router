@@ -89,6 +89,8 @@ refresh_interval_hours: 12
 ### 设计原则
 
 - **单端口 8337** —— 所有 agent 指向同一个 base_url，按模型 ID 路由
+- **多线程处理** —— ThreadingHTTPServer，避免单请求阻塞影响其他请求
+- **User-Agent 标识** —— 转发时带 `open-free-router/0.1`，避免 Cloudflare 1010 拦截
 - **零依赖 Web 框架** —— 使用 Python stdlib `http.server`，无需 Flask/FastAPI
 - **刷新源可插拔** —— `refresh_sources/` 下每 provider 一个模块，导出 `fetch(base_url, api_key) → list[ModelInfo]`
 - **自动 Pi 同步** —— 检测到 `~/.pi/agent/` 目录存在时自动写入 models.json

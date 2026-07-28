@@ -53,12 +53,15 @@ src/open_free_router/
 ## Key conventions
 
 - **Single-port proxy (8337)** — all agents point to one base_url; routing by model ID via `_model_index`
+- **Multi-threaded** — both proxy and UI use `ThreadingHTTPServer` (stdlib) to avoid head-of-line blocking
+- **User-Agent** — upstream requests include `User-Agent: open-free-router/0.1` to avoid Cloudflare 1010 blocks (Python urllib default triggers bot detection)
+- **Timeout** — upstream `urlopen` timeout is 30s (fail fast, avoid connection pile-up)
 - **Zero web framework** — uses stdlib `http.server`; no Flask/FastAPI/uvicorn
 - **Refresh sources** are pluggable modules. Each must export `fetch(upstream_url, api_key) -> list[ModelInfo]`
 - **Pi models.json** written by `serve.py` on startup and after each refresh. Format: `{providers: {name: {baseUrl, models: [...]}}}`. All providers point to local proxy; routing is by model ID.
 - **Scheduler interval** configurable via `config.yaml: refresh_interval_hours` (default 12)
-- **ModelInfo serialization** omits default values (context_window=131072, max_tokens=8192, reasoning=False)
-- **base_url** in registry is optional/empty — `upstream_url` is what matters (the real upstream API endpoint)
+- **ModelInfo** fields: `id` (short display name, e.g. `glm-5.2`), `upstream_id` (optional, e.g. `z-ai/glm-5.2`, falls back to `id`)
+- **ProviderConfig** field: `prefix` (short channel prefix for model IDs, e.g. `nv`, `or`. Falls back to provider name)
 - **config.yaml `registry:` path** resolved relative to config's parent directory, not CWD
 
 ## Scripts
