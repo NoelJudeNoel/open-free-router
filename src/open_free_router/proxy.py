@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import ClassVar
 from urllib.request import Request, urlopen
@@ -129,10 +129,11 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {key}",
+            "User-Agent": "open-free-router/0.1",
         }
         try:
             req_out = Request(url, data=data, headers=headers, method="POST")
-            with urlopen(req_out, timeout=120) as r:
+            with urlopen(req_out, timeout=30) as r:
                 resp = r.read()
                 self.send_response(r.status)
                 for k, v in r.headers.items():
@@ -162,7 +163,7 @@ def run_proxy(registry: Registry, host: str = "127.0.0.1", port: int = 8337):
         "registry": registry,
     })
     handler.rebuild_index()
-    srv = HTTPServer((host, port), handler)
+    srv = ThreadingHTTPServer((host, port), handler)
     print(f"  Proxy  : {host}:{port} (single-port, model-ID routing)")
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()

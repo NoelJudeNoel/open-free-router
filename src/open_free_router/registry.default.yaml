@@ -75,7 +75,6 @@ opencode-zen-free:
   - id: north-mini-code-free
   - id: nemotron-3-ultra-free
   - id: v4-flash-free
-    upstream_id: deepseek-v4-flash-free
   prefix: zen
 openrouter:
   upstream_url: https://openrouter.ai/api/v1

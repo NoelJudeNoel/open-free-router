@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 from open_free_router.config import Config
@@ -237,7 +237,7 @@ def run_ui(cfg: Config, port: int = 9527, reg: Registry | None = None):
     _UIHandler.cfg = cfg
     _UIHandler.reg = reg or Registry.load(cfg.registry_path)
     _UIHandler.config_path = cfg.path
-    srv = HTTPServer((cfg.ui_host, port), _UIHandler)
+    srv = ThreadingHTTPServer((cfg.ui_host, port), _UIHandler)
     print(f"🌐 Dashboard: http://{cfg.ui_host}:{port}")
     try:
         srv.serve_forever()
