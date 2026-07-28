@@ -28,12 +28,20 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             for name, p in cls.registry.providers.items():
                 prefix = p.model_prefix
                 for m in p.models:
-                    # Prefix model ID with provider name so users can distinguish
-                    # which upstream provides the model (e.g. nv/z-ai/glm-5.2)
+                    # Register all forms of the model ID so agents can use
+                    # whichever format they prefer:
+                    #   1. bare id       (e.g. glm-5.2)
+                    #   2. prefix/id     (e.g. nv/glm-5.2)
+                    #   3. upstream_id   (e.g. z-ai/glm-5.2) — matches what
+                    #      Hermes and other agents send when they show the
+                    #      "provider/model" label to users
                     idx[m.id] = name
                     prefixed = f"{prefix}/{m.id}"
                     if prefixed not in idx:
                         idx[prefixed] = name
+                    uid = m.effective_upstream_id
+                    if uid != m.id and uid not in idx:
+                        idx[uid] = name
         with cls._index_lock:
             cls._model_index = idx
 
@@ -114,7 +122,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 found = False
                 for m in prov.models:
                     display = f"{prov.model_prefix}/{m.id}"
-                    if display == model_id or m.id == model_id:
+                    if display == model_id or m.id == model_id or m.effective_upstream_id == model_id:
                         upstream_model_id = m.effective_upstream_id
                         found = True
                         break

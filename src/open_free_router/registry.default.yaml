@@ -46,6 +46,8 @@ nvidia-nim:
     upstream_id: stepfun-ai/step-3.7-flash
   - id: glm-5.2
     upstream_id: z-ai/glm-5.2
+  - id: deepseek-v4-flash
+    upstream_id: deepseek-ai/deepseek-v4-flash
   prefix: nv
 nous:
   upstream_url: https://inference-api.nousresearch.com/v1
