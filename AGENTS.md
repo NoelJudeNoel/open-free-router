@@ -63,6 +63,11 @@ src/open_free_router/
 - **ModelInfo** fields: `id` (short display name, e.g. `glm-5.2`), `upstream_id` (optional, e.g. `z-ai/glm-5.2`, falls back to `id`)
 - **ProviderConfig** field: `prefix` (short channel prefix for model IDs, e.g. `nv`, `or`. Falls back to provider name)
 - **config.yaml `registry:` path** resolved relative to config's parent directory, not CWD
+- **4 model ID formats** — proxy resolves all of them:
+  1. bare id       `glm-5.2`
+  2. prefix/id     `nv/glm-5.2`
+  3. upstream_id   `z-ai/glm-5.2`
+  4. provider/upstream_id `nvidia-nim/z-ai/glm-5.2` (OMP format)
 
 ## Scripts
 

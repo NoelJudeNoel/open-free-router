@@ -156,3 +156,28 @@ class TestProxyHandler:
         assert _ProxyHandler._model_index["m1"] == "openrouter"
         assert _ProxyHandler._model_index["m2"] == "openrouter"
         assert _ProxyHandler._model_index["d1"] == "deepseek"
+
+    def test_rebuild_index_provider_upstream_format(self):
+        """provider/upstream_id format must resolve for OMP compatibility."""
+        from open_free_router.proxy import _ProxyHandler
+        reg = Registry({
+            "nvidia-nim": {
+                "upstream_url": "https://integrate.api.nvidia.com/v1",
+                "prefix": "nv",
+                "models": [
+                    {"id": "glm-5.2", "upstream_id": "z-ai/glm-5.2"},
+                    {"id": "minimax-m3", "upstream_id": "minimaxai/minimax-m3"},
+                ],
+            },
+        })
+        _ProxyHandler.registry = reg
+        _ProxyHandler.rebuild_index()
+        index = _ProxyHandler._model_index
+        # New format: provider/upstream_id (OMP uses nvidia-nim/z-ai/glm-5.2)
+        assert index["nvidia-nim/z-ai/glm-5.2"] == "nvidia-nim"
+        # provider/upstream_id when upstream_id itself contains a slash
+        assert index["nvidia-nim/minimaxai/minimax-m3"] == "nvidia-nim"
+        # Existing formats still work
+        assert index["nv/glm-5.2"] == "nvidia-nim"
+        assert index["glm-5.2"] == "nvidia-nim"
+        assert index["z-ai/glm-5.2"] == "nvidia-nim"
