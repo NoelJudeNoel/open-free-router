@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${1:-https://github.com/NoelJudeNoel/open-free-router.git}"
+REPO_URL="https://github.com/NoelJudeNoel/open-free-router.git"
+INSTALL_SYSTEMD=false
+for arg in "$@"; do
+  case "$arg" in
+    --with-systemd) INSTALL_SYSTEMD=true ;;
+    *) REPO_URL="$arg" ;;
+  esac
+done
 INSTALL_DIR="${OPEN_FREE_ROUTER_HOME:-$HOME/.local/open-free-router}"
 CONFIG_DIR="${OPEN_FREE_ROUTER_CONFIG_HOME:-$HOME/.config/open-free-router}"
 PYTHON="${OPEN_FREE_ROUTER_PYTHON:-python3}"
@@ -45,6 +52,8 @@ proxy:
 ui:
   host: 127.0.0.1
   port: 9057
+
+refresh_interval_hours: 12
 EOF
 fi
 
@@ -60,7 +69,7 @@ echo "  3. Start:   open-free-router serve"
 echo ""
 
 # Optional: install systemd service for auto-start
-if [ "${1:-}" = "--with-systemd" ] || [ "${OPEN_FREE_ROUTER_SYSTEMD:-}" = "1" ]; then
+if [ "$INSTALL_SYSTEMD" = true ] || [ "${OPEN_FREE_ROUTER_SYSTEMD:-}" = "1" ]; then
   if command -v systemctl >/dev/null 2>&1; then
     echo "⏳ Installing systemd service..."
     sed "s|/opt/open-free-router|$INSTALL_DIR|g" "$INSTALL_DIR/contrib/systemd/open-free-router.service" \
