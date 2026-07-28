@@ -35,6 +35,9 @@ class Config:
         self.proxy_host = self._raw.get("proxy", {}).get("host", "127.0.0.1")
         self.proxy_port = int(self._raw.get("proxy", {}).get("port", 8337))
 
+        # scheduler
+        self.refresh_interval_hours = int(self._raw.get("refresh_interval_hours", 12))
+
         # ui
         self.ui_host = self._raw.get("ui", {}).get("host", "127.0.0.1")
         self.ui_port = int(self._raw.get("ui", {}).get("port", 9057))

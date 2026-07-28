@@ -201,17 +201,23 @@ class _UIHandler(BaseHTTPRequestHandler):
         if not self.reg:
             return
         try:
-            models = []
-            for p in self.reg.providers.values():
-                for m in p.models:
-                    models.append({
-                        "id": m.id,
-                        "name": m.name or m.id,
-                        "context_window": m.context_window,
-                        "max_tokens": m.max_tokens,
-                        "reasoning": m.reasoning,
-                    })
-            PI_MODELS_PATH.write_text(json.dumps(models, indent=2, ensure_ascii=False) + "\n")
+            proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1" if self.cfg else "http://127.0.0.1:8337/v1"
+            providers = {}
+            for name, p in self.reg.providers.items():
+                providers[name] = {
+                    "baseUrl": proxy_url,
+                    "models": [
+                        {
+                            "id": m.id,
+                            "name": m.name or m.id,
+                            "contextWindow": m.context_window,
+                            "maxTokens": m.max_tokens,
+                            "reasoning": m.reasoning,
+                        }
+                        for m in p.models
+                    ],
+                }
+            PI_MODELS_PATH.write_text(json.dumps({"providers": providers}, indent=2, ensure_ascii=False) + "\n")
         except Exception:
             pass
 

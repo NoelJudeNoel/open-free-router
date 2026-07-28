@@ -19,23 +19,34 @@ from open_free_router.refresh import refresh
 PI_MODELS_PATH = Path.home() / ".pi" / "agent" / "models.json"
 
 
-def write_pi_models(reg: Registry):
-    """Write registry models to Pi's models.json if Pi config dir exists."""
+def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/v1"):
+    """Write registry models to Pi's models.json if Pi config dir exists.
+
+    Pi expects {providers: {name: {baseUrl, models: [...]}}}
+    All providers point to the local single-port proxy; routing is by model ID.
+    """
     if not PI_MODELS_PATH.parent.exists():
         return
     try:
-        models = []
-        for p in reg.providers.values():
-            for m in p.models:
-                models.append({
-                    "id": m.id,
-                    "name": m.name or m.id,
-                    "context_window": m.context_window,
-                    "max_tokens": m.max_tokens,
-                    "reasoning": m.reasoning,
-                })
-        PI_MODELS_PATH.write_text(json.dumps(models, indent=2, ensure_ascii=False) + "\n")
-        print(f"  ✓ wrote {len(models)} models to Pi ({PI_MODELS_PATH})")
+        providers = {}
+        for name, p in reg.providers.items():
+            providers[name] = {
+                "baseUrl": proxy_base_url,
+                "models": [
+                    {
+                        "id": m.id,
+                        "name": m.name or m.id,
+                        "contextWindow": m.context_window,
+                        "maxTokens": m.max_tokens,
+                        "reasoning": m.reasoning,
+                    }
+                    for m in p.models
+                ],
+            }
+        data = {"providers": providers}
+        PI_MODELS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        total = sum(len(p["models"]) for p in providers.values())
+        print(f"  ✓ wrote {total} models to Pi ({PI_MODELS_PATH})")
     except Exception as e:
         print(f"  ⚠ failed to write Pi models: {e}")
 
@@ -50,9 +61,9 @@ class Daemon:
         self._stop = threading.Event()
 
     def _scheduler(self):
-        interval_hours = 12
+        interval_hours = self.cfg.refresh_interval_hours
         while not self._stop.wait(interval_hours * 3600):
-            print("[scheduler] refreshing free models...")
+            print(f"[scheduler] refreshing free models (every {interval_hours}h)...")
             results = refresh(self.reg)
             if any(results.values()):
                 self.reg.save(self.cfg.registry_path)
@@ -63,7 +74,7 @@ class Daemon:
     def serve(self):
         print(f"  Proxy  : {self.cfg.proxy_host}:{self.cfg.proxy_port}")
         print(f"  UI     : http://{self.cfg.ui_host}:{self.cfg.ui_port}")
-        print("  Refresh: every 12h")
+        print(f"  Refresh: every {self.cfg.refresh_interval_hours}h")
         print()
 
         # Start proxy
@@ -71,7 +82,8 @@ class Daemon:
         self._proxy_server = srv
 
         # Write Pi models on startup
-        write_pi_models(self.reg)
+        proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
+        write_pi_models(self.reg, proxy_base_url=proxy_url)
 
         threads = [
             threading.Thread(target=run_ui, args=(self.cfg, self.cfg.ui_port, self.reg), daemon=True),

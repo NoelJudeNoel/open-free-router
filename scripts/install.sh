@@ -26,6 +26,11 @@ source .venv/bin/activate
 pip install -q -U pip setuptools wheel
 pip install -q -e .
 
+# Symlink to system path if writable
+if [ -w /usr/local/bin ]; then
+  ln -sf "$INSTALL_DIR/.venv/bin/open-free-router" /usr/local/bin/open-free-router
+fi
+
 mkdir -p "$CONFIG_DIR"
 
 if [ ! -f "$CONFIG_DIR/config.yaml" ]; then
@@ -53,3 +58,19 @@ echo "  1. Edit $CONFIG_DIR/registry.yaml and add your API keys"
 echo "  2. Or run:  open-free-router setup"
 echo "  3. Start:   open-free-router serve"
 echo ""
+
+# Optional: install systemd service for auto-start
+if [ "${1:-}" = "--with-systemd" ] || [ "${OPEN_FREE_ROUTER_SYSTEMD:-}" = "1" ]; then
+  if command -v systemctl >/dev/null 2>&1; then
+    echo "⏳ Installing systemd service..."
+    sed "s|/opt/open-free-router|$INSTALL_DIR|g" "$INSTALL_DIR/contrib/systemd/open-free-router.service" \
+      > /etc/systemd/system/open-free-router.service
+    systemctl daemon-reload
+    systemctl enable open-free-router.service
+    echo "✔ systemd service installed and enabled"
+    echo "  Start:  systemctl start open-free-router"
+    echo "  Status: systemctl status open-free-router"
+  else
+    echo "⚠ systemctl not found, skipping systemd setup"
+  fi
+fi

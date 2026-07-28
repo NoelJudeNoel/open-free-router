@@ -1,0 +1,15 @@
+[Unit]
+Description=open-free-router — Free LLM Model Router
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/open-free-router
+ExecStart=/opt/open-free-router/.venv/bin/open-free-router serve
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
