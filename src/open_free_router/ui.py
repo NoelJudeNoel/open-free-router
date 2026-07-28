@@ -208,7 +208,7 @@ class _UIHandler(BaseHTTPRequestHandler):
                     "baseUrl": proxy_url,
                     "models": [
                         {
-                            "id": m.id,
+                            "id": f"{p.model_prefix}/{m.id}",
                             "name": m.name or m.id,
                             "contextWindow": m.context_window,
                             "maxTokens": m.max_tokens,

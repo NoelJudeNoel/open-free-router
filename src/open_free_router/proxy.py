@@ -26,8 +26,14 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         idx = {}
         if cls.registry:
             for name, p in cls.registry.providers.items():
+                prefix = p.model_prefix
                 for m in p.models:
+                    # Prefix model ID with provider name so users can distinguish
+                    # which upstream provides the model (e.g. nv/z-ai/glm-5.2)
                     idx[m.id] = name
+                    prefixed = f"{prefix}/{m.id}"
+                    if prefixed not in idx:
+                        idx[prefixed] = name
         with cls._index_lock:
             cls._model_index = idx
 
@@ -69,8 +75,9 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         items = []
         for name, p in self.registry.providers.items():
             for m in p.models:
+                # Show provider-prefixed ID so users can distinguish upstreams
                 items.append({
-                    "id": m.id,
+                    "id": f"{p.model_prefix}/{m.id}",
                     "object": "model",
                     "created": 0,
                     "owned_by": name,
@@ -100,6 +107,22 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self._send_json(502, {"error": "provider not configured"})
             return
 
+        # Look up the actual model to get upstream ID
+        upstream_model_id = model_id  # fallback
+        if self.registry:
+            for prov in self.registry.providers.values():
+                found = False
+                for m in prov.models:
+                    display = f"{prov.model_prefix}/{m.id}"
+                    if display == model_id or m.id == model_id:
+                        upstream_model_id = m.effective_upstream_id
+                        found = True
+                        break
+                if found:
+                    break
+        req["model"] = upstream_model_id
+        data = json.dumps(req).encode()
+
         upstream = (p.upstream_url or p.base_url).rstrip("/")
         key = p.effective_key
         url = f"{upstream}/chat/completions"
@@ -107,7 +130,6 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {key}",
         }
-        data = body.encode()
         try:
             req_out = Request(url, data=data, headers=headers, method="POST")
             with urlopen(req_out, timeout=120) as r:

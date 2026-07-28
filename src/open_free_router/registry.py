@@ -8,16 +8,23 @@ from typing import Optional
 
 @dataclass
 class ModelInfo:
-    id: str
+    id: str  # Short display ID (e.g. "glm-5.2", "deepseek-chat")
+    upstream_id: str = ""  # Upstream API model ID (e.g. "z-ai/glm-5.2"). Falls back to id.
     name: str = ""
     context_window: int = 131072
     max_tokens: int = 8192
     reasoning: bool = False
 
+    @property
+    def effective_upstream_id(self) -> str:
+        """Model ID to send to upstream API."""
+        return self.upstream_id or self.id
+
     @classmethod
     def from_dict(cls, d: dict) -> "ModelInfo":
         return cls(
             id=d["id"],
+            upstream_id=d.get("upstream_id", ""),
             name=d.get("name", d["id"]),
             context_window=d.get("context_window", 131072),
             max_tokens=d.get("max_tokens", 8192),
@@ -26,6 +33,8 @@ class ModelInfo:
 
     def to_dict(self) -> dict:
         d = {"id": self.id}
+        if self.upstream_id:
+            d["upstream_id"] = self.upstream_id
         if self.name:
             d["name"] = self.name
         if self.context_window != 131072:
@@ -47,10 +56,16 @@ class ProviderConfig:
     models: list[ModelInfo] = field(default_factory=list)
     auto_refresh: bool = False
     refresh_method: str = "manual"
+    prefix: str = ""  # Short prefix for model IDs (e.g. "nv" for nvidia-nim)
 
     @property
     def effective_key(self) -> str:
         return self.api_keys[0] if self.api_keys else self.api_key
+
+    @property
+    def model_prefix(self) -> str:
+        """Short prefix for model IDs. Falls back to name if not set."""
+        return self.prefix or self.name
 
     def free_model_ids(self) -> set[str]:
         return {m.id for m in self.models}
@@ -78,6 +93,7 @@ class Registry:
                 models=models,
                 auto_refresh=cfg.get("auto_refresh", False),
                 refresh_method=cfg.get("refresh_method", "manual"),
+                prefix=cfg.get("prefix", ""),
             )
 
     def to_dict(self) -> dict:
@@ -94,6 +110,8 @@ class Registry:
                 d["api_key"] = p.api_key
             if p.api_keys:
                 d["api_keys"] = p.api_keys
+            if p.prefix:
+                d["prefix"] = p.prefix
             if p.models:
                 d["models"] = [m.to_dict() for m in p.models]
             out[name] = d

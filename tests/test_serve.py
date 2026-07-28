@@ -14,10 +14,12 @@ def test_write_pi_models_creates_correct_format(tmp_path):
     reg = Registry({
         "openrouter": {
             "upstream_url": "https://openrouter.ai/api/v1",
+            "prefix": "or",
             "models": [{"id": "m1:free"}, {"id": "m2:free"}],
         },
         "deepseek": {
             "upstream_url": "https://api.deepseek.com/v1",
+            "prefix": "ds",
             "models": [{"id": "deepseek-chat"}],
         },
     })
@@ -38,8 +40,8 @@ def test_write_pi_models_creates_correct_format(tmp_path):
             assert "contextWindow" in m
             assert "maxTokens" in m
 
-    assert data["providers"]["openrouter"]["models"][0]["id"] == "m1:free"
-    assert data["providers"]["deepseek"]["models"][0]["id"] == "deepseek-chat"
+    assert data["providers"]["openrouter"]["models"][0]["id"] == "or/m1:free"
+    assert data["providers"]["deepseek"]["models"][0]["id"] == "ds/deepseek-chat"
 
 
 def test_write_pi_models_skips_if_no_pi_dir(tmp_path):

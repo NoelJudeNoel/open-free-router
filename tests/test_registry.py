@@ -61,6 +61,20 @@ class TestModelInfo:
         d = m.to_dict()
         assert d == {"id": "m1", "name": "M1", "context_window": 64000, "max_tokens": 4096, "reasoning": True}
 
+    def test_upstream_id_fallback(self):
+        m = ModelInfo(id="glm-5.2")
+        assert m.effective_upstream_id == "glm-5.2"
+
+    def test_upstream_id_explicit(self):
+        m = ModelInfo(id="glm-5.2", upstream_id="z-ai/glm-5.2")
+        assert m.effective_upstream_id == "z-ai/glm-5.2"
+
+    def test_to_dict_includes_upstream_id(self):
+        m = ModelInfo(id="glm-5.2", upstream_id="z-ai/glm-5.2")
+        d = m.to_dict()
+        assert d["id"] == "glm-5.2"
+        assert d["upstream_id"] == "z-ai/glm-5.2"
+
 
 class TestProviderConfig:
     def test_effective_key_single(self):

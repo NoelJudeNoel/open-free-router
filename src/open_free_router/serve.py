@@ -24,6 +24,8 @@ def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/
 
     Pi expects {providers: {name: {baseUrl, models: [...]}}}
     All providers point to the local single-port proxy; routing is by model ID.
+    Model IDs are prefixed with provider name (e.g. nvidia-nim/z-ai/glm-5.2)
+    so users can distinguish which upstream provides the model.
     """
     if not PI_MODELS_PATH.parent.exists():
         return
@@ -34,7 +36,7 @@ def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/
                 "baseUrl": proxy_base_url,
                 "models": [
                     {
-                        "id": m.id,
+                        "id": f"{p.model_prefix}/{m.id}",
                         "name": m.name or m.id,
                         "contextWindow": m.context_window,
                         "maxTokens": m.max_tokens,

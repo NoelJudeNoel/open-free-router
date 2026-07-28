@@ -6,6 +6,7 @@ deepseek:
   models:
   - id: deepseek-chat
   - id: deepseek-reasoner
+  prefix: ds
 google-ai-studio:
   upstream_url: https://generativelanguage.googleapis.com/v1beta
   auto_refresh: false
@@ -15,37 +16,54 @@ google-ai-studio:
   - id: gemini-2.5-flash
   - id: gemini-2.5-flash-lite
   - id: gemini-2.5-pro
+  prefix: gai
 groq:
   upstream_url: https://api.groq.com/openai/v1
   auto_refresh: false
   refresh_method: manual
   api_key: ''
   models:
-  - id: llama-3.3-70b-versatile
-  - id: llama-3.1-8b-instant
-  - id: gemma2-9b-it
-  - id: mixtral-8x7b-32768
+  - id: llama-3.3-70b
+    upstream_id: llama-3.3-70b-versatile
+  - id: llama-3.1-8b
+    upstream_id: llama-3.1-8b-instant
+  - id: gemma2-9b
+    upstream_id: gemma2-9b-it
+  - id: mixtral-8x7b
+    upstream_id: mixtral-8x7b-32768
+  prefix: gq
 nvidia-nim:
   upstream_url: https://integrate.api.nvidia.com/v1
   auto_refresh: false
   refresh_method: manual
   api_key: ''
   models:
-  - id: minimaxai/minimax-m3
-  - id: nvidia/nemotron-3-ultra-550b-a55b
-  - id: stepfun-ai/step-3.7-flash
-  - id: z-ai/glm-5.2
+  - id: minimax-m3
+    upstream_id: minimaxai/minimax-m3
+  - id: nemotron-3-ultra
+    upstream_id: nvidia/nemotron-3-ultra-550b-a55b
+  - id: step-3.7-flash
+    upstream_id: stepfun-ai/step-3.7-flash
+  - id: glm-5.2
+    upstream_id: z-ai/glm-5.2
+  prefix: nv
 nous:
   upstream_url: https://inference-api.nousresearch.com/v1
   auto_refresh: false
   refresh_method: manual
   api_key: ''
   models:
-  - id: inclusionai/ling-3.0-flash:free
-  - id: poolside/laguna-s-2.1:free
-  - id: poolside/laguna-xs-2.1:free
-  - id: stepfun/step-3.7-flash:free
-  - id: tencent/hy3:free
+  - id: ling-3.0-flash:free
+    upstream_id: inclusionai/ling-3.0-flash:free
+  - id: laguna-s:free
+    upstream_id: poolside/laguna-s-2.1:free
+  - id: laguna-xs:free
+    upstream_id: poolside/laguna-xs-2.1:free
+  - id: step-3.7-flash:free
+    upstream_id: stepfun/step-3.7-flash:free
+  - id: hy3:free
+    upstream_id: tencent/hy3:free
+  prefix: ns
 opencode-zen-free:
   upstream_url: https://opencode.ai/zen/v1
   auto_refresh: false
@@ -56,30 +74,44 @@ opencode-zen-free:
   - id: mimo-v2.5-free
   - id: north-mini-code-free
   - id: nemotron-3-ultra-free
-  - id: deepseek-v4-flash-free
+  - id: v4-flash-free
+    upstream_id: deepseek-v4-flash-free
+  prefix: zen
 openrouter:
   upstream_url: https://openrouter.ai/api/v1
   auto_refresh: true
   refresh_method: openrouter_api
   api_key: ''
   models:
-  - id: nvidia/nemotron-3-ultra-550b-a55b:free
-  - id: inclusionai/ling-3.0-flash:free
-  - id: google/gemma-4-26b-a4b-it:free
-  - id: google/gemma-4-31b-it:free
-  - id: nvidia/nemotron-3-super-120b-a12b:free
-  - id: cohere/north-mini-code:free
-  - id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
-  - id: nvidia/nemotron-3-nano-30b-a3b:free
-  - id: openai/gpt-oss-20b:free
+  - id: nemotron-3-ultra:free
+    upstream_id: nvidia/nemotron-3-ultra-550b-a55b:free
+  - id: ling-3.0-flash:free
+    upstream_id: inclusionai/ling-3.0-flash:free
+  - id: gemma-4-26b:free
+    upstream_id: google/gemma-4-26b-a4b-it:free
+  - id: gemma-4-31b:free
+    upstream_id: google/gemma-4-31b-it:free
+  - id: nemotron-3-super:free
+    upstream_id: nvidia/nemotron-3-super-120b-a12b:free
+  - id: north-mini-code:free
+    upstream_id: cohere/north-mini-code:free
+  - id: nemotron-3-nano-r:free
+    upstream_id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+  - id: nemotron-3-nano:free
+    upstream_id: nvidia/nemotron-3-nano-30b-a3b:free
+  - id: gpt-oss-20b:free
+    upstream_id: openai/gpt-oss-20b:free
+  prefix: or
 sensenova:
   upstream_url: https://token.sensenova.cn/v1
   auto_refresh: false
   refresh_method: manual
   api_key: ''
   models:
-  - id: deepseek-v4-flash
+  - id: v4-flash
+    upstream_id: deepseek-v4-flash
   - id: glm-5.2
+  prefix: nova
 stepfun:
   upstream_url: https://api.stepfun.com/step_plan/v1
   auto_refresh: false
@@ -87,3 +119,4 @@ stepfun:
   api_key: ''
   models:
   - id: step-3.7-flash
+  prefix: sf
