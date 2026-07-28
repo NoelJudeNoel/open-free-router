@@ -152,7 +152,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         }
         try:
             req_out = Request(url, data=data, headers=headers, method="POST")
-            with urlopen(req_out, timeout=30) as r:
+            timeout = getattr(self, "_upstream_timeout", 120)
+            with urlopen(req_out, timeout=timeout) as r:
                 resp = r.read()
                 self.send_response(r.status)
                 for k, v in r.headers.items():
@@ -177,9 +178,10 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         pass
 
 
-def run_proxy(registry: Registry, host: str = "127.0.0.1", port: int = 8337):
+def run_proxy(registry: Registry, host: str = "127.0.0.1", port: int = 8337, upstream_timeout: int = 120):
     handler = type("Handler", (_ProxyHandler,), {
         "registry": registry,
+        "_upstream_timeout": upstream_timeout,
     })
     handler.rebuild_index()
     srv = ThreadingHTTPServer((host, port), handler)

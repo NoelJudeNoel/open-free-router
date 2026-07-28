@@ -78,10 +78,12 @@ class Daemon:
         print(f"  Proxy  : {self.cfg.proxy_host}:{self.cfg.proxy_port}")
         print(f"  UI     : http://{self.cfg.ui_host}:{self.cfg.ui_port}")
         print(f"  Refresh: every {self.cfg.refresh_interval_hours}h")
+        print(f"  Timeout: {self.cfg.upstream_timeout}s")
         print()
 
         # Start proxy
-        srv, _ = run_proxy(self.reg, host=self.cfg.proxy_host, port=self.cfg.proxy_port)
+        srv, _ = run_proxy(self.reg, host=self.cfg.proxy_host, port=self.cfg.proxy_port,
+                           upstream_timeout=self.cfg.upstream_timeout)
         self._proxy_server = srv
 
         # Write Pi models on startup

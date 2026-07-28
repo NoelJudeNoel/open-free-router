@@ -45,6 +45,9 @@ class Config:
         # scheduler
         self.refresh_interval_hours = int(self._raw.get("refresh_interval_hours", 12))
 
+        # proxy upstream timeout
+        self.upstream_timeout = int(self._raw.get("upstream_timeout", 120))
+
         # ui
         self.ui_host = self._raw.get("ui", {}).get("host", "127.0.0.1")
         self.ui_port = int(self._raw.get("ui", {}).get("port", 9057))
