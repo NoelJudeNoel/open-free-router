@@ -65,6 +65,18 @@ class _ProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         from urllib.parse import urlparse
         path = urlparse(self.path).path
+        if path == "/":
+            self._send_json(200, {
+                "service": "open-free-router",
+                "version": "0.1",
+                "endpoints": {
+                    "models": "/v1/models",
+                    "chat": "/v1/chat/completions",
+                    "ui": f"http://{self.server.server_address[0]}:9057",
+                },
+                "docs": "https://github.com/NoelJudeNoel/open-free-router",
+            })
+            return
         if path == "/v1/models":
             self._handle_list_models()
             return

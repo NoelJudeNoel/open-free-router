@@ -148,6 +148,31 @@ def cmd_setup(args):
         print("\n✓ No changes.")
 
 
+def cmd_sync(args):
+    """Sync registry to agent configs (OMP, OpenCode)."""
+    from open_free_router.sync import sync_all
+    cfg = Config()
+    _bootstrap_registry(cfg)
+    reg = Registry.load(cfg.registry_path)
+
+    agents = None
+    if args.agent:
+        agents = [a.strip() for a in args.agent.split(",")]
+
+    do_write = not args.diff
+    results = sync_all(reg, do_write=do_write, agents=agents)
+
+    label = "DIFF" if args.diff else "SYNC"
+    print(f"\n=== {label} ===")
+    for agent, changes in results.items():
+        status = "✔" if do_write else "?"
+        print(f"  {status} {agent}: {changes}")
+
+    if do_write:
+        print(f"\n✔ Backups at {sync_all.__module__}")
+        print("  Restart agents to apply: omp-telegram, opencode")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="open-free-router",
@@ -177,6 +202,11 @@ def main():
 
     p_setup = sub.add_parser("setup", help="interactive wizard: configure API keys for all providers")
     p_setup.set_defaults(func=cmd_setup)
+
+    p_sync = sub.add_parser("sync", help="sync registry to agent configs (OMP, OpenCode)")
+    p_sync.add_argument("--agent", help="comma-separated agent names: omp,opencode")
+    p_sync.add_argument("--diff", action="store_true", help="show diff only, don't write")
+    p_sync.set_defaults(func=cmd_sync)
 
     args = parser.parse_args()
     if not args.command:
