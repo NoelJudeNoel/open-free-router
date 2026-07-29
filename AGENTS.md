@@ -15,6 +15,7 @@
 | `open-free-router setup` | Interactive wizard: fill in API keys for all providers |
 | `open-free-router refresh [--source NAME] [--dry-run]` | Poll provider APIs for free model changes |
 | `open-free-router add NAME --base-url URL [--upstream-url URL] [--model ID] [--auto-refresh]` | Add a provider to registry |
+| `open-free-router sync [--agent omp,opencode] [--diff]` | Sync registry to OMP/OpenCode configs |
 
 ## Config
 
@@ -37,7 +38,7 @@
 
 ```
 src/open_free_router/
-├── cli.py              # argparser → routes to serve/ui/refresh/add/setup
+├── cli.py              # argparser → routes to serve/ui/refresh/add/sync/setup
 ├── config.py           # Config class: loads config.yaml, resolves paths
 ├── registry.py         # Registry CRUD: ProviderConfig + ModelInfo dataclasses
 ├── registry.default.yaml  # Template with 9 upstream sources, no API keys
@@ -45,6 +46,7 @@ src/open_free_router/
 ├── refresh.py          # Dispatches per-provider refresh from refresh_sources/
 ├── refresh_sources/    # Pluggable: openrouter.py, nvidia_nim.py, groq.py, etc.
 ├── serve.py            # Daemon: proxy + UI + scheduler + Pi models.json writer
+├── sync.py             # Sync registry to OMP/OpenCode configs
 ├── ui.py               # Web dashboard (9057): status, provider CRUD, refresh, config edit
 ├── templates/          # UI templates (index.html)
 └── web_static/         # UI static assets (CSS, JS)
@@ -55,7 +57,7 @@ src/open_free_router/
 - **Single-port proxy (8337)** — all agents point to one base_url; routing by model ID via `_model_index`
 - **Multi-threaded** — both proxy and UI use `ThreadingHTTPServer` (stdlib) to avoid head-of-line blocking
 - **User-Agent** — upstream requests include `User-Agent: open-free-router/0.1` to avoid Cloudflare 1010 blocks (Python urllib default triggers bot detection)
-- **Timeout** — upstream `urlopen` timeout is 30s (fail fast, avoid connection pile-up)
+- **Timeout** — upstream `urlopen` timeout is 120s (configurable via `upstream_timeout` in config.yaml)
 - **Zero web framework** — uses stdlib `http.server`; no Flask/FastAPI/uvicorn
 - **Refresh sources** are pluggable modules. Each must export `fetch(upstream_url, api_key) -> list[ModelInfo]`
 - **Pi models.json** written by `serve.py` on startup and after each refresh. Format: `{providers: {name: {baseUrl, models: [...]}}}`. All providers point to local proxy; routing is by model ID.
@@ -68,6 +70,7 @@ src/open_free_router/
   2. prefix/id     `nv/glm-5.2`
   3. upstream_id   `z-ai/glm-5.2`
   4. provider/upstream_id `nvidia-nim/z-ai/glm-5.2` (OMP format)
+- **Sync** — `open-free-router sync` writes OMP models.yml and OpenCode opencode.json from registry
 
 ## Scripts
 
