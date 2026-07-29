@@ -43,6 +43,7 @@ nvidia-nim:
   - id: nemotron-3-ultra
     upstream_id: nvidia/nemotron-3-ultra-550b-a55b
   - id: step-3.7-flash
+    reasoning: true
     upstream_id: stepfun-ai/step-3.7-flash
   - id: glm-5.2
     upstream_id: z-ai/glm-5.2
@@ -120,4 +121,5 @@ stepfun:
   api_key: ''
   models:
   - id: step-3.7-flash
+    reasoning: true
   prefix: sf
