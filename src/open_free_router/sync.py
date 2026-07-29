@@ -42,7 +42,7 @@ def _mask_key(key: str) -> str:
 # ══════════════════════════════════════
 # OMP sync
 # ══════════════════════════════════════
-def sync_omp(reg: Registry, do_write: bool = True) -> list[str]:
+def sync_omp(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.0.0.1:8337/v1") -> list[str]:
     """Sync registry → OMP models.yml."""
     text = OMP_MODELS.read_text() if OMP_MODELS.exists() else "providers:\n"
     changes = []
@@ -51,8 +51,8 @@ def sync_omp(reg: Registry, do_write: bool = True) -> list[str]:
         key = _mask_key(p.effective_key)
         # Remove existing block
         text = re.sub(rf'^  {re.escape(name)}:\n(?:    [^\n]*\n)*', '', text, flags=re.MULTILINE)
-        # Build new block
-        block = f"\n  {name}:\n    baseUrl: {p.upstream_url or p.base_url}\n    apiKey: {key}\n    api: openai-completions\n    models:\n"
+        # Build new block — all providers point to the single-port proxy
+        block = f"\n  {name}:\n    baseUrl: {proxy_url}\n    apiKey: {key}\n    api: openai-completions\n    models:\n"
         for m in p.models:
             block += f"      - id: {m.id}\n"
             block += f"        name: {m.name or m.id}\n"
@@ -75,7 +75,7 @@ def sync_omp(reg: Registry, do_write: bool = True) -> list[str]:
 # ══════════════════════════════════════
 # OpenCode sync
 # ══════════════════════════════════════
-def sync_opencode(reg: Registry, do_write: bool = True) -> list[str]:
+def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.0.0.1:8337/v1") -> list[str]:
     """Sync registry → OpenCode opencode.json."""
     if OPENCODE_CONFIG.exists():
         text = OPENCODE_CONFIG.read_text()
@@ -113,7 +113,7 @@ def sync_opencode(reg: Registry, do_write: bool = True) -> list[str]:
             "name": name.replace("-", " ").title(),
             "npm": "@ai-sdk/openai-compatible",
             "models": models_map,
-            "options": {"baseURL": p.upstream_url or p.base_url, "apiKey": key},
+            "options": {"baseURL": proxy_url, "apiKey": key},
         }
         changes.append(name)
 
@@ -125,7 +125,7 @@ def sync_opencode(reg: Registry, do_write: bool = True) -> list[str]:
 # ══════════════════════════════════════
 # Main
 # ══════════════════════════════════════
-def sync_all(reg: Registry, do_write: bool = True, agents: list[str] | None = None) -> dict[str, list[str]]:
+def sync_all(reg: Registry, do_write: bool = True, agents: list[str] | None = None, proxy_url: str = "http://127.0.0.1:8337/v1") -> dict[str, list[str]]:
     """Sync registry to all agents. Returns {agent: [changed_providers]}."""
     if agents is None:
         agents = ["omp", "opencode"]
@@ -143,7 +143,7 @@ def sync_all(reg: Registry, do_write: bool = True, agents: list[str] | None = No
         fn = sync_map.get(agent)
         if fn:
             try:
-                changes = fn(reg, do_write=do_write)
+                changes = fn(reg, do_write=do_write, proxy_url=proxy_url)
                 results[agent] = changes
             except Exception as e:
                 results[agent] = [f"ERROR: {e}"]
