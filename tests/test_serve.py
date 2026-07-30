@@ -25,7 +25,7 @@ def test_write_pi_models_creates_correct_format(tmp_path):
     })
 
     with patch("open_free_router.sync.PI_MODELS_PATH", pi_path):
-        write_pi_models(reg, proxy_base_url="http://127.0.0.1:8337/v1")
+        write_pi_models(reg, proxy_url="http://127.0.0.1:8337/v1")
 
     data = json.loads(pi_path.read_text())
     assert isinstance(data, dict)

@@ -146,7 +146,7 @@ class _UIHandler(BaseHTTPRequestHandler):
         rebuild_proxy_index()
         if self.cfg:
             proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
-            write_pi_models(self.reg, proxy_base_url=proxy_url)
+            write_pi_models(self.reg, proxy_url=proxy_url)
         self._send_json(200, {"ok": True, "results": results, "saved": changed})
 
     def _api_providers_post(self):
@@ -195,7 +195,7 @@ class _UIHandler(BaseHTTPRequestHandler):
         rebuild_proxy_index()
         if self.cfg:
             proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
-            write_pi_models(self.reg, proxy_base_url=proxy_url)
+            write_pi_models(self.reg, proxy_url=proxy_url)
         self._send_json(200, {"ok": True, "provider": name, "models": len(models)})
 
     def _send_json(self, code: int, obj: dict):

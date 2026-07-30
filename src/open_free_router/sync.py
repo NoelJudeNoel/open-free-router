@@ -26,16 +26,19 @@ PI_MODELS_PATH = Path.home() / ".pi" / "agent" / "models.json"
 BACKUP_DIR = Path.home() / ".openclaw" / "agent-backup" / date.today().isoformat()
 
 
-def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/v1"):
+def write_pi_models(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.0.0.1:8337/v1") -> list[str]:
     """Write registry models to Pi's models.json if Pi config dir exists.
 
     Pi expects {providers: {name: {baseUrl, models: [...]}}}
     All providers point to the local single-port proxy; routing is by model ID.
     Model IDs are prefixed with provider name (e.g. nv/glm-5.2)
     so users can distinguish which upstream provides the model.
+
+    Always overwrites the entire file — no stale entries can accumulate.
+    Returns list of provider names written.
     """
     if not PI_MODELS_PATH.parent.exists():
-        return
+        return []
     try:
         from open_free_router.config import _PI_PROVIDER_NAMES
 
@@ -43,7 +46,7 @@ def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/
         for name, p in reg.providers.items():
             pi_name = _PI_PROVIDER_NAMES.get(name, name)
             providers[pi_name] = {
-                "baseUrl": proxy_base_url,
+                "baseUrl": proxy_url,
                 "models": [
                     {
                         "id": f"{p.model_prefix}/{m.id}",
@@ -55,12 +58,15 @@ def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/
                     for m in p.models
                 ],
             }
-        data = {"providers": providers}
-        PI_MODELS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        if do_write:
+            data = {"providers": providers}
+            PI_MODELS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
         total = sum(len(p["models"]) for p in providers.values())
         print(f"  ✓ wrote {total} models to Pi ({PI_MODELS_PATH})")
+        return list(providers.keys())
     except Exception as e:
         print(f"  ⚠ failed to write Pi models: {e}")
+        return []
 
 
 def _backup():
@@ -84,13 +90,31 @@ def _mask_key(key: str) -> str:
 # OMP sync
 # ══════════════════════════════════════
 def sync_omp(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.0.0.1:8337/v1") -> list[str]:
-    """Sync registry → OMP models.yml."""
-    text = OMP_MODELS.read_text() if OMP_MODELS.exists() else "providers:\n"
-    changes = []
+    """Sync registry → OMP models.yml.
 
+    First removes ALL providers that point to the local proxy, then writes
+    fresh entries from the registry. Prevents stale duplicates.
+    """
+    text = OMP_MODELS.read_text() if OMP_MODELS.exists() else "providers:\n"
+
+    # Remove all provider blocks pointing to local proxy
+    local_proxy_markers = ("127.0.0.1", "localhost")
+    removed = []
+    # Find all top-level provider names (2-space indent, colon at end)
+    provider_names = re.findall(r'^  (\S+?):\s*$', text, re.MULTILINE)
+    for pname in provider_names:
+        # Extract the block for this provider
+        pattern = rf'^(  {re.escape(pname)}:\n(?:    [^\n]*\n)*)'
+        m = re.search(pattern, text, re.MULTILINE)
+        if m and any(marker in m.group(0) for marker in local_proxy_markers):
+            text = text.replace(m.group(0), "")
+            removed.append(pname)
+
+    # Write fresh entries from registry
+    changes = []
     for name, p in reg.providers.items():
         key = _mask_key(p.effective_key)
-        # Remove existing block
+        # Remove existing block if any
         text = re.sub(rf'^  {re.escape(name)}:\n(?:    [^\n]*\n)*', '', text, flags=re.MULTILINE)
         # Build new block — all providers point to the single-port proxy
         block = f"\n  {name}:\n    baseUrl: {proxy_url}\n    apiKey: {key}\n    api: openai-completions\n    models:\n"
@@ -104,6 +128,9 @@ def sync_omp(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.
             block += f"        cost:\n          input: 0\n          output: 0\n          cacheRead: 0\n          cacheWrite: 0\n"
         text = text.rstrip() + "\n" + block
         changes.append(name)
+
+    if removed:
+        print(f"  Removed {len(removed)} stale OMP providers: {', '.join(removed)}")
 
     text = re.sub(r'\n{3,}', '\n\n', text)
     if do_write:
@@ -266,13 +293,14 @@ def sync_hermes(reg: Registry, do_write: bool = True, proxy_url: str = "http://1
 def sync_all(reg: Registry, do_write: bool = True, agents: list[str] | None = None, proxy_url: str = "http://127.0.0.1:8337/v1") -> dict[str, list[str]]:
     """Sync registry to all agents. Returns {agent: [changed_providers]}."""
     if agents is None:
-        agents = ["omp", "opencode", "hermes"]
+        agents = ["pi", "omp", "opencode", "hermes"]
 
     if do_write:
         _backup()
 
     results = {}
     sync_map = {
+        "pi": write_pi_models,
         "omp": sync_omp,
         "opencode": sync_opencode,
         "hermes": sync_hermes,

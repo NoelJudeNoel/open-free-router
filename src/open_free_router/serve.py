@@ -36,7 +36,7 @@ class Daemon:
                 rebuild_proxy_index()
                 print("[scheduler] registry updated")
             proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
-            write_pi_models(self.reg, proxy_base_url=proxy_url)
+            write_pi_models(self.reg, proxy_url=proxy_url)
             sync_all(self.reg, proxy_url=proxy_url)
 
     def serve(self):
@@ -53,7 +53,7 @@ class Daemon:
 
         # Write Pi models on startup
         proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
-        write_pi_models(self.reg, proxy_base_url=proxy_url)
+        write_pi_models(self.reg, proxy_url=proxy_url)
         sync_all(self.reg, proxy_url=proxy_url)
 
         threads = [
