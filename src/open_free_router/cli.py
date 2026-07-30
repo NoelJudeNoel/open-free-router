@@ -149,7 +149,7 @@ def cmd_setup(args):
 
 
 def cmd_sync(args):
-    """Sync registry to agent configs (OMP, OpenCode)."""
+    """Sync registry to agent configs (Pi, OMP, OpenCode, Hermes)."""
     from open_free_router.sync import sync_all
     cfg = Config()
     _bootstrap_registry(cfg)
@@ -170,7 +170,7 @@ def cmd_sync(args):
 
     if do_write:
         print(f"\n✔ Backups at {sync_all.__module__}")
-        print("  Restart agents to apply: omp-telegram, opencode")
+        print("  Restart agents to apply: omp-telegram, opencode, hermes")
 
 
 def main():
@@ -203,8 +203,8 @@ def main():
     p_setup = sub.add_parser("setup", help="interactive wizard: configure API keys for all providers")
     p_setup.set_defaults(func=cmd_setup)
 
-    p_sync = sub.add_parser("sync", help="sync registry to agent configs (OMP, OpenCode)")
-    p_sync.add_argument("--agent", help="comma-separated agent names: omp,opencode")
+    p_sync = sub.add_parser("sync", help="sync registry to agent configs (Pi, OMP, OpenCode, Hermes)")
+    p_sync.add_argument("--agent", help="comma-separated agent names: omp,opencode,hermes")
     p_sync.add_argument("--diff", action="store_true", help="show diff only, don't write")
     p_sync.set_defaults(func=cmd_sync)
 

@@ -6,11 +6,10 @@ import json
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-from open_free_router.config import Config, _PI_PROVIDER_NAMES
+from open_free_router.config import Config
 from open_free_router.registry import ModelInfo, ProviderConfig, Registry
 from open_free_router.proxy import rebuild_proxy_index
-
-PI_MODELS_PATH = Path.home() / ".pi" / "agent" / "models.json"
+from open_free_router.sync import write_pi_models
 
 
 class _UIHandler(BaseHTTPRequestHandler):
@@ -145,7 +144,9 @@ class _UIHandler(BaseHTTPRequestHandler):
             assert self.cfg is not None
             self.reg.save(self.cfg.registry_path)
         rebuild_proxy_index()
-        self._write_pi_models()
+        if self.cfg:
+            proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
+            write_pi_models(self.reg, proxy_base_url=proxy_url)
         self._send_json(200, {"ok": True, "results": results, "saved": changed})
 
     def _api_providers_post(self):
@@ -192,35 +193,10 @@ class _UIHandler(BaseHTTPRequestHandler):
         self.reg.add_provider(p)
         self.reg.save(self.cfg.registry_path)
         rebuild_proxy_index()
-        self._write_pi_models()
+        if self.cfg:
+            proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
+            write_pi_models(self.reg, proxy_base_url=proxy_url)
         self._send_json(200, {"ok": True, "provider": name, "models": len(models)})
-
-    def _write_pi_models(self):
-        if not PI_MODELS_PATH.parent.exists():
-            return
-        if not self.reg:
-            return
-        try:
-            proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1" if self.cfg else "http://127.0.0.1:8337/v1"
-            providers = {}
-            for name, p in self.reg.providers.items():
-                pi_name = _PI_PROVIDER_NAMES.get(name, name)
-                providers[pi_name] = {
-                    "baseUrl": proxy_url,
-                    "models": [
-                        {
-                            "id": f"{p.model_prefix}/{m.id}",
-                            "name": m.name or m.id,
-                            "contextWindow": m.context_window,
-                            "maxTokens": m.max_tokens,
-                            "reasoning": m.reasoning,
-                        }
-                        for m in p.models
-                    ],
-                }
-            PI_MODELS_PATH.write_text(json.dumps({"providers": providers}, indent=2, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
 
     def _send_json(self, code: int, obj: dict):
         body = json.dumps(obj, indent=2).encode()

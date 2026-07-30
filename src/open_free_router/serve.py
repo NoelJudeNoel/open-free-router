@@ -9,49 +9,12 @@ import signal
 import sys
 from pathlib import Path
 
-from open_free_router.config import Config, _PI_PROVIDER_NAMES
+from open_free_router.config import Config
 from open_free_router.registry import Registry
 from open_free_router.proxy import run_proxy, rebuild_proxy_index
 from open_free_router.ui import run_ui
 from open_free_router.refresh import refresh
-
-
-PI_MODELS_PATH = Path.home() / ".pi" / "agent" / "models.json"
-
-
-def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/v1"):
-    """Write registry models to Pi's models.json if Pi config dir exists.
-
-    Pi expects {providers: {name: {baseUrl, models: [...]}}}
-    All providers point to the local single-port proxy; routing is by model ID.
-    Model IDs are prefixed with provider name (e.g. nv/glm-5.2)
-    so users can distinguish which upstream provides the model.
-    """
-    if not PI_MODELS_PATH.parent.exists():
-        return
-    try:
-        providers = {}
-        for name, p in reg.providers.items():
-            pi_name = _PI_PROVIDER_NAMES.get(name, name)
-            providers[pi_name] = {
-                "baseUrl": proxy_base_url,
-                "models": [
-                    {
-                        "id": f"{p.model_prefix}/{m.id}",
-                        "name": m.name or m.id,
-                        "contextWindow": m.context_window,
-                        "maxTokens": m.max_tokens,
-                        "reasoning": m.reasoning,
-                    }
-                    for m in p.models
-                ],
-            }
-        data = {"providers": providers}
-        PI_MODELS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-        total = sum(len(p["models"]) for p in providers.values())
-        print(f"  ✓ wrote {total} models to Pi ({PI_MODELS_PATH})")
-    except Exception as e:
-        print(f"  ⚠ failed to write Pi models: {e}")
+from open_free_router.sync import write_pi_models, sync_all
 
 
 class Daemon:
@@ -72,7 +35,9 @@ class Daemon:
                 self.reg.save(self.cfg.registry_path)
                 rebuild_proxy_index()
                 print("[scheduler] registry updated")
-            write_pi_models(self.reg)
+            proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
+            write_pi_models(self.reg, proxy_base_url=proxy_url)
+            sync_all(self.reg, proxy_url=proxy_url)
 
     def serve(self):
         print(f"  Proxy  : {self.cfg.proxy_host}:{self.cfg.proxy_port}")
@@ -89,6 +54,7 @@ class Daemon:
         # Write Pi models on startup
         proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
         write_pi_models(self.reg, proxy_base_url=proxy_url)
+        sync_all(self.reg, proxy_url=proxy_url)
 
         threads = [
             threading.Thread(target=run_ui, args=(self.cfg, self.cfg.ui_port, self.reg), daemon=True),

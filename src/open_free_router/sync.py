@@ -1,9 +1,10 @@
-"""Sync registry models to agent config files (OMP, OpenCode).
+"""Sync registry models to agent config files (Pi, OMP, OpenCode, Hermes).
 
 Usage:
     open-free-router sync                  # sync all agents
     open-free-router sync --agent omp      # sync only OMP
     open-free-router sync --agent opencode # sync only OpenCode
+    open-free-router sync --agent hermes    # sync only Hermes
     open-free-router sync --diff           # show diff, don't write
 """
 from __future__ import annotations
@@ -20,23 +21,63 @@ from open_free_router.registry import Registry
 OMP_MODELS = Path.home() / ".omp" / "agent" / "models.yml"
 OMP_CONFIG = Path.home() / ".omp" / "agent" / "config.yml"
 OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
-BACKUP_DIR = Path(f"/root/.openclaw/workspace/agent-backup-{date.today().isoformat()}")
+HERMES_CONFIG = Path.home() / ".hermes" / "config.yaml"
+PI_MODELS_PATH = Path.home() / ".pi" / "agent" / "models.json"
+BACKUP_DIR = Path.home() / ".openclaw" / "agent-backup" / date.today().isoformat()
+
+
+def write_pi_models(reg: Registry, proxy_base_url: str = "http://127.0.0.1:8337/v1"):
+    """Write registry models to Pi's models.json if Pi config dir exists.
+
+    Pi expects {providers: {name: {baseUrl, models: [...]}}}
+    All providers point to the local single-port proxy; routing is by model ID.
+    Model IDs are prefixed with provider name (e.g. nv/glm-5.2)
+    so users can distinguish which upstream provides the model.
+    """
+    if not PI_MODELS_PATH.parent.exists():
+        return
+    try:
+        from open_free_router.config import _PI_PROVIDER_NAMES
+
+        providers = {}
+        for name, p in reg.providers.items():
+            pi_name = _PI_PROVIDER_NAMES.get(name, name)
+            providers[pi_name] = {
+                "baseUrl": proxy_base_url,
+                "models": [
+                    {
+                        "id": f"{p.model_prefix}/{m.id}",
+                        "name": m.name or m.id,
+                        "contextWindow": m.context_window,
+                        "maxTokens": m.max_tokens,
+                        "reasoning": m.reasoning,
+                    }
+                    for m in p.models
+                ],
+            }
+        data = {"providers": providers}
+        PI_MODELS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        total = sum(len(p["models"]) for p in providers.values())
+        print(f"  ✓ wrote {total} models to Pi ({PI_MODELS_PATH})")
+    except Exception as e:
+        print(f"  ⚠ failed to write Pi models: {e}")
 
 
 def _backup():
     """Backup agent config files before overwriting."""
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    for f in [OMP_MODELS, OMP_CONFIG, OPENCODE_CONFIG]:
+    for f in [OMP_MODELS, OMP_CONFIG, OPENCODE_CONFIG, HERMES_CONFIG]:
         if f.exists():
             shutil.copy2(str(f), str(BACKUP_DIR / f.name))
 
 
 def _mask_key(key: str) -> str:
-    if not key:
-        return "***"
-    if len(key) > 12:
-        return f"{key[:8]}...{key[-4:]}"
-    return "***"
+    """Return the real API key, or a placeholder if none is configured.
+
+    The proxy needs real upstream keys to authenticate with provider APIs.
+    Using masked/fake keys would cause all requests to fail with auth errors.
+    """
+    return key or "sk-no-key"
 
 
 # ══════════════════════════════════════
@@ -76,17 +117,30 @@ def sync_omp(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.
 # OpenCode sync
 # ══════════════════════════════════════
 def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.0.0.1:8337/v1") -> list[str]:
-    """Sync registry → OpenCode opencode.json."""
+    """Sync registry → OpenCode opencode.json.
+
+    Handles JSONC (JSON with comments) by stripping comments for parsing,
+    then writing back clean JSON. This is simpler and more reliable than
+    trying to preserve comments, since OpenCode accepts both JSON and JSONC.
+    """
     if OPENCODE_CONFIG.exists():
-        text = OPENCODE_CONFIG.read_text()
-        # Try direct JSON parse first (most OpenCode configs are valid JSON)
+        raw_text = OPENCODE_CONFIG.read_text()
+        data = None
         try:
-            data = json.loads(text)
+            data = json.loads(raw_text)
         except json.JSONDecodeError:
-            # Fallback: strip JSONC comments and trailing commas
-            text = re.sub(r'(?<![:\"])//[^\\n]*', '', text)
-            text = re.sub(r',\s*([}\\]])', r'\\1', text, re.DOTALL)
-            data = json.loads(text)
+            # Try stripping JSONC comments and trailing commas
+            text = re.sub(r'//[^\n]*', '', raw_text)
+            text = re.sub(r',\s*([}\])]', r'\1', text, re.DOTALL)
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                # File is malformed — try to recover valid JSON portion
+                decoder = json.JSONDecoder()
+                try:
+                    data, _ = decoder.raw_decode(raw_text.lstrip())
+                except json.JSONDecodeError:
+                    data = {"provider": {}}
     else:
         data = {"provider": {}}
 
@@ -98,7 +152,6 @@ def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http:/
         key = _mask_key(p.effective_key)
         models_map = {}
         for m in p.models:
-            # OpenCode model key: simplified version of the id
             mkey = m.id.split("/")[-1].replace(":free", "")
             models_map[mkey] = {
                 "name": m.name or m.id,
@@ -123,12 +176,84 @@ def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http:/
 
 
 # ══════════════════════════════════════
+# Hermes sync
+# ══════════════════════════════════════
+def sync_hermes(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.0.0.1:8337/v1") -> list[str]:
+    """Ensure Hermes has a custom_providers entry pointing to the proxy.
+
+    Hermes auto-discovers models from the /v1/models endpoint at runtime,
+    so we don't need to write a static model list. We only need to ensure
+    a custom_providers entry exists with the correct base_url.
+    """
+    if not HERMES_CONFIG.exists():
+        return []
+
+    import yaml
+
+    try:
+        text = HERMES_CONFIG.read_text()
+        config = yaml.safe_load(text) or {}
+    except Exception:
+        return []
+
+    if not isinstance(config, dict):
+        return []
+
+    custom_providers = config.get("custom_providers", [])
+    if not isinstance(custom_providers, list):
+        custom_providers = []
+
+    changes = []
+    existing_names = {cp.get("name") for cp in custom_providers if isinstance(cp, dict)}
+
+    # Check if we already have an entry pointing to our proxy
+    has_entry = any(
+        cp.get("base_url", "").rstrip("/") == proxy_url.rstrip("/")
+        for cp in custom_providers
+        if isinstance(cp, dict)
+    )
+
+    if not has_entry:
+        # Add a custom_providers entry for the proxy
+        # Use the first provider's key as the API key
+        key = ""
+        for name, p in reg.providers.items():
+            if p.effective_key:
+                key = p.effective_key
+                break
+
+        new_entry = {
+            "name": "open-free-router",
+            "api_mode": "chat_completions",
+            "base_url": proxy_url,
+            "api_key": key or "sk-no-key",
+            "model": "glm-5.2",  # default model
+            "context_length": 262144,
+            "max_tokens": 16384,
+            "discover_models": True,  # Hermes will auto-discover from /v1/models
+        }
+        custom_providers.append(new_entry)
+        config["custom_providers"] = custom_providers
+        changes.append("open-free-router")
+
+    if do_write and changes:
+        try:
+            # Write back preserving YAML format
+            new_text = yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            HERMES_CONFIG.write_text(new_text)
+        except Exception:
+            pass
+
+    return changes
+
+
+# ══════════════════════════════════════
 # Main
 # ══════════════════════════════════════
 def sync_all(reg: Registry, do_write: bool = True, agents: list[str] | None = None, proxy_url: str = "http://127.0.0.1:8337/v1") -> dict[str, list[str]]:
     """Sync registry to all agents. Returns {agent: [changed_providers]}."""
     if agents is None:
-        agents = ["omp", "opencode"]
+        agents = ["omp", "opencode", "hermes"]
 
     if do_write:
         _backup()
@@ -137,6 +262,7 @@ def sync_all(reg: Registry, do_write: bool = True, agents: list[str] | None = No
     sync_map = {
         "omp": sync_omp,
         "opencode": sync_opencode,
+        "hermes": sync_hermes,
     }
 
     for agent in agents:

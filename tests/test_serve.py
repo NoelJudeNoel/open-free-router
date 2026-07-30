@@ -1,10 +1,10 @@
-"""Tests for serve.py (write_pi_models)."""
+"""Tests for sync.py (write_pi_models)."""
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 from open_free_router.registry import Registry
-from open_free_router.serve import write_pi_models
+from open_free_router.sync import write_pi_models
 
 
 def test_write_pi_models_creates_correct_format(tmp_path):
@@ -24,7 +24,7 @@ def test_write_pi_models_creates_correct_format(tmp_path):
         },
     })
 
-    with patch("open_free_router.serve.PI_MODELS_PATH", pi_path):
+    with patch("open_free_router.sync.PI_MODELS_PATH", pi_path):
         write_pi_models(reg, proxy_base_url="http://127.0.0.1:8337/v1")
 
     data = json.loads(pi_path.read_text())
@@ -48,6 +48,6 @@ def test_write_pi_models_skips_if_no_pi_dir(tmp_path):
     pi_path = tmp_path / ".pi" / "agent" / "models.json"
     # Don't create the directory
     reg = Registry({})
-    with patch("open_free_router.serve.PI_MODELS_PATH", pi_path):
+    with patch("open_free_router.sync.PI_MODELS_PATH", pi_path):
         write_pi_models(reg)
     assert not pi_path.exists()
