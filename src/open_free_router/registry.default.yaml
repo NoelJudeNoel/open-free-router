@@ -58,15 +58,22 @@ nous:
   models:
   - id: ling-3.0-flash:free
     upstream_id: inclusionai/ling-3.0-flash:free
-  - id: laguna-s:free
-    upstream_id: poolside/laguna-s-2.1:free
-  - id: laguna-xs:free
-    upstream_id: poolside/laguna-xs-2.1:free
   - id: step-3.7-flash:free
     upstream_id: stepfun/step-3.7-flash:free
-  - id: hy3:free
-    upstream_id: tencent/hy3:free
   prefix: ns
+poolside:
+  upstream_url: https://inference.poolside.ai/v1
+  auto_refresh: true
+  refresh_method: poolside_api
+  api_key: ''
+  models:
+  - id: laguna-s:free
+    upstream_id: poolside/laguna-s-2.1
+    reasoning: true
+  - id: laguna-xs:free
+    upstream_id: poolside/laguna-xs-2.1
+    reasoning: true
+  prefix: ps
 opencode-zen-free:
   upstream_url: https://opencode.ai/zen/v1
   auto_refresh: false

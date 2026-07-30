@@ -119,9 +119,10 @@ def sync_omp(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.
 def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.0.0.1:8337/v1") -> list[str]:
     """Sync registry → OpenCode opencode.json.
 
-    Handles JSONC (JSON with comments) by stripping comments for parsing,
-    then writing back clean JSON. This is simpler and more reliable than
-    trying to preserve comments, since OpenCode accepts both JSON and JSONC.
+    First removes ALL providers that point to the local proxy (baseURL
+    contains 127.0.0.1 or localhost), then writes fresh entries from the
+    registry. This prevents duplicate local-* / provider-* entries from
+    accumulating across syncs.
     """
     if OPENCODE_CONFIG.exists():
         raw_text = OPENCODE_CONFIG.read_text()
@@ -129,13 +130,11 @@ def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http:/
         try:
             data = json.loads(raw_text)
         except json.JSONDecodeError:
-            # Try stripping JSONC comments and trailing commas
             text = re.sub(r'//[^\n]*', '', raw_text)
             text = re.sub(r',\s*([}\])]', r'\1', text, re.DOTALL)
             try:
                 data = json.loads(text)
             except json.JSONDecodeError:
-                # File is malformed — try to recover valid JSON portion
                 decoder = json.JSONDecoder()
                 try:
                     data, _ = decoder.raw_decode(raw_text.lstrip())
@@ -147,6 +146,17 @@ def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http:/
     if "provider" not in data:
         data["provider"] = {}
 
+    # Remove all providers pointing to local proxy (stale duplicates)
+    local_proxy_markers = ("127.0.0.1", "localhost")
+    removed = []
+    for pname in list(data["provider"]):
+        opts = data["provider"][pname].get("options", {})
+        base_url = opts.get("baseURL", "")
+        if any(marker in base_url for marker in local_proxy_markers):
+            del data["provider"][pname]
+            removed.append(pname)
+
+    # Write fresh entries from registry
     changes = []
     for name, p in reg.providers.items():
         key = _mask_key(p.effective_key)
@@ -169,6 +179,9 @@ def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http:/
             "options": {"baseURL": proxy_url, "apiKey": key},
         }
         changes.append(name)
+
+    if removed:
+        print(f"  Removed {len(removed)} stale local-proxy providers: {', '.join(removed)}")
 
     if do_write:
         OPENCODE_CONFIG.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")

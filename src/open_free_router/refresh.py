@@ -12,6 +12,7 @@ from open_free_router.refresh_sources import (
     google_ai_studio,
     groq,
     deepseek,
+    poolside,
 )
 
 # Map registry provider name -> refresh source module
@@ -21,6 +22,7 @@ SOURCE_MAP = {
     "google-ai-studio": google_ai_studio,
     "groq": groq,
     "deepseek": deepseek,
+    "poolside": poolside,
 }
 
 
