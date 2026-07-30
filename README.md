@@ -7,7 +7,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-route
 open-free-router serve
 ```
 
-追踪 9 个 LLM 提供商的免费模型（OpenRouter、NVIDIA NIM、OpenCode Zen、Nous Research、StepFun、SenseNova、Groq、Google AI Studio、DeepSeek），运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表。一次配置，所有 Agent（Hermes、OpenCode、PI、OMP）共享模型。
+追踪 10 个 LLM 提供商的免费模型（OpenRouter、NVIDIA NIM、OpenCode Zen、Nous Research、StepFun、SenseNova、Groq、Google AI Studio、DeepSeek、Poolside AI），运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表。一次配置，所有 Agent（Hermes、OpenCode、PI、OMP）共享模型。
 
 ## 安装
 

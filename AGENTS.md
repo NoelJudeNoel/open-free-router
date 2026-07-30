@@ -28,7 +28,7 @@
 
 ## Bootstrap
 
-- `src/open_free_router/registry.default.yaml` — template with 9 upstream sources and model lists, no API keys
+- `src/open_free_router/registry.default.yaml` — template with 10 upstream sources and model lists, no API keys
 - `scripts/install.sh` — one-liner installer (git clone + venv + setup). `--with-systemd` for systemd auto-start
 - `contrib/systemd/open-free-router.service` — systemd service unit
 - First `serve` auto-bootstraps config + registry; `open-free-router setup` walks through key entry interactively
@@ -41,12 +41,12 @@ src/open_free_router/
 ├── cli.py              # argparser → routes to serve/ui/refresh/add/sync/setup
 ├── config.py           # Config class: loads config.yaml, resolves paths
 ├── registry.py         # Registry CRUD: ProviderConfig + ModelInfo dataclasses
-├── registry.default.yaml  # Template with 9 upstream sources, no API keys
+├── registry.default.yaml  # Template with 10 upstream sources, no API keys
 ├── proxy.py            # Single-port proxy (8337), routes by model ID to upstream
 ├── refresh.py          # Dispatches per-provider refresh from refresh_sources/
 ├── refresh_sources/    # Pluggable: openrouter.py, nvidia_nim.py, groq.py, etc.
 ├── serve.py            # Daemon: proxy + UI + scheduler + Pi models.json writer
-├── sync.py             # Sync registry to OMP/OpenCode configs
+├── sync.py             # Sync registry to Pi/OMP/OpenCode/Hermes configs (dedup-aware)
 ├── ui.py               # Web dashboard (9057): status, provider CRUD, refresh, config edit
 ├── templates/          # UI templates (index.html)
 └── web_static/         # UI static assets (CSS, JS)
@@ -70,7 +70,8 @@ src/open_free_router/
   2. prefix/id     `nv/glm-5.2`
   3. upstream_id   `z-ai/glm-5.2`
   4. provider/upstream_id `nvidia-nim/z-ai/glm-5.2` (OMP format)
-- **Sync** — `open-free-router sync` writes OMP models.yml and OpenCode opencode.json from registry
+- **Sync** — `open-free-router sync` writes Pi models.json, OMP models.yml, OpenCode opencode.json, and ensures Hermes custom_providers entry from registry
+- **Sync dedup** — before writing, removes all providers pointing to local proxy (baseURL contains 127.0.0.1) to prevent duplicate accumulation; Pi always overwrites entire file
 
 ## Scripts
 
@@ -85,12 +86,13 @@ src/open_free_router/
 - Run: `pip install -e ".[dev]" && python3 -m pytest tests/ -v`
 - No CI/CD configured yet
 
-## Supported providers (9)
+## Supported providers (10)
 
-openrouter, nvidia-nim, opencode-zen-free, sensenova, stepfun, google-ai-studio, groq, deepseek, nous
+openrouter, nvidia-nim, opencode-zen-free, sensenova, stepfun, google-ai-studio, groq, deepseek, nous, poolside
 
 ## Related
 
 - `registry.default.yaml` defines the canonical model list for each provider
 - `refresh_sources/*.py` implement `fetch()` for auto-refresh capable providers
-- `serve.py`'s `write_pi_models()` and `ui.py`'s `_write_pi_models()` share the same format — keep in sync
+- `sync.py`'s `write_pi_models()` is called by both `serve.py` (on startup + refresh) and `ui.py`
+- Sync removes stale local-proxy entries before re-adding from registry (prevents duplicate accumulation)
