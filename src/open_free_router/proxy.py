@@ -2,6 +2,8 @@
 
 GET  /v1/models           → all free models from registry
 POST /v1/chat/completions → forward to the correct upstream by model ID
+POST /v1/completions      → same routing, legacy completions endpoint
+POST /v1/embeddings       → same routing, embeddings endpoint
 """
 from __future__ import annotations
 
@@ -62,11 +64,13 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         with self._index_lock:
             return self._model_index.get(model_id)
 
-    def _send_json(self, code: int, obj: dict):
+    def _send_json(self, code: int, obj: dict, retry_after: str | None = None):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if retry_after:
+            self.send_header("Retry-After", retry_after)
         self.end_headers()
         self.wfile.write(body)
 
@@ -80,6 +84,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 "endpoints": {
                     "models": "/v1/models",
                     "chat": "/v1/chat/completions",
+                    "completions": "/v1/completions",
+                    "embeddings": "/v1/embeddings",
                     "ui": f"http://{self.server.server_address[0]}:9057",
                 },
                 "docs": "https://github.com/NoelJudeNoel/open-free-router",
@@ -90,16 +96,47 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             return
         self._send_json(404, {"error": "not found"})
 
+    # Generous but bounded — protects the proxy process from a client (or a
+    # buggy/malicious one, if this ever ends up reachable beyond localhost)
+    # sending an unbounded body. 25MB comfortably covers long-context chat
+    # payloads; nothing in this proxy's supported endpoints needs more.
+    MAX_BODY_BYTES: ClassVar[int] = 25 * 1024 * 1024
+
     def do_POST(self):
         from urllib.parse import urlparse
         path = urlparse(self.path).path
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length).decode()
 
-        if path == "/v1/chat/completions":
-            self._handle_chat_completion(body)
+        endpoint_map = {
+            "/v1/chat/completions": "chat/completions",
+            "/v1/completions": "completions",
+            "/v1/embeddings": "embeddings",
+        }
+        upstream_suffix = endpoint_map.get(path)
+        if not upstream_suffix:
+            # Drain and discard so the connection can be reused/closed
+            # cleanly, but don't bother enforcing the size limit on a
+            # request we're rejecting anyway.
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            if length:
+                self.rfile.read(min(length, self.MAX_BODY_BYTES))
+            self._send_json(404, {"error": "not found"})
             return
-        self._send_json(404, {"error": "not found"})
+
+        length_header = self.headers.get("Content-Length")
+        try:
+            length = int(length_header) if length_header is not None else None
+        except ValueError:
+            length = None
+        if length is None:
+            self._send_json(411, {"error": "Content-Length required"})
+            return
+        if length > self.MAX_BODY_BYTES:
+            self._send_json(413, {"error": f"request body too large (> {self.MAX_BODY_BYTES} bytes)"})
+            self.close_connection = True
+            return
+
+        body = self.rfile.read(length).decode("utf-8", errors="replace")
+        self._forward_request(upstream_suffix, body)
 
     def _handle_list_models(self):
         if not self.registry:
@@ -117,7 +154,11 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 })
         self._send_json(200, {"object": "list", "data": items})
 
-    def _handle_chat_completion(self, body: str):
+    def _forward_request(self, endpoint_suffix: str, body: str):
+        """Route + forward a POST to /v1/chat/completions, /v1/completions,
+        or /v1/embeddings — model lookup and upstream routing are the same
+        for all three; only the upstream path suffix and (for chat/
+        completions) streaming support differ."""
         try:
             req = json.loads(body)
         except json.JSONDecodeError:
@@ -160,12 +201,12 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     upstream_model_id = m.effective_upstream_id
                     break
         req["model"] = upstream_model_id
-        is_stream = bool(req.get("stream"))
+        is_stream = endpoint_suffix != "embeddings" and bool(req.get("stream"))
         data = json.dumps(req).encode()
 
         upstream = (p.upstream_url or p.base_url).rstrip("/")
         key = p.effective_key
-        url = f"{upstream}/chat/completions"
+        url = f"{upstream}/{endpoint_suffix}"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {key}",
@@ -177,26 +218,30 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self._forward_streaming(url, data, headers, timeout)
             return
 
+        self._forward_buffered(url, data, headers, timeout)
+
+    def _forward_buffered(self, url: str, data: bytes, headers: dict, timeout: int):
         try:
             req_out = Request(url, data=data, headers=headers, method="POST")
             with urlopen(req_out, timeout=timeout) as r:
                 resp = r.read()
                 self.send_response(r.status)
                 for k, v in r.headers.items():
-                    if k.lower() in ("content-type", "content-length"):
+                    if k.lower() in ("content-type", "content-length", "retry-after"):
                         self.send_header(k, v)
                 self.end_headers()
                 self.wfile.write(resp)
         except URLError as e:
             code = getattr(e, "code", 502)
             raw = getattr(e, "read", lambda: b"")()
+            retry_after = e.headers.get("Retry-After") if getattr(e, "headers", None) else None
             if raw:
                 try:
-                    self._send_json(code, json.loads(raw))
+                    self._send_json(code, json.loads(raw), retry_after=retry_after)
                 except json.JSONDecodeError:
-                    self._send_json(code, {"error": raw.decode("utf-8", errors="replace")})
+                    self._send_json(code, {"error": raw.decode("utf-8", errors="replace")}, retry_after=retry_after)
             else:
-                self._send_json(code, {"error": str(e.reason)})
+                self._send_json(code, {"error": str(e.reason)}, retry_after=retry_after)
         except Exception as e:
             self._send_json(502, {"error": str(e)})
 
@@ -225,10 +270,11 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
             if resp.status >= 400:
                 body = resp.read()
+                retry_after = resp.getheader("Retry-After")
                 try:
-                    self._send_json(resp.status, json.loads(body))
+                    self._send_json(resp.status, json.loads(body), retry_after=retry_after)
                 except json.JSONDecodeError:
-                    self._send_json(resp.status, {"error": body.decode("utf-8", errors="replace")})
+                    self._send_json(resp.status, {"error": body.decode("utf-8", errors="replace")}, retry_after=retry_after)
                 return
 
             self.send_response(resp.status)
