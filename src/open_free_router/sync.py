@@ -94,49 +94,79 @@ def sync_omp(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.
 
     First removes ALL providers that point to the local proxy, then writes
     fresh entries from the registry. Prevents stale duplicates.
+
+    Uses ruamel.yaml's round-trip mode (not regex text surgery) so any
+    provider blocks the user configured by hand — comments, formatting,
+    unrelated entries — survive untouched. A previous regex-based
+    implementation matched "2-space indent, colon at end" to find provider
+    blocks; that breaks on anything the regex didn't anticipate (tabs,
+    multi-line values, differently-indented comments), silently mangling
+    or losing hand-edited config on the same pass that's supposed to only
+    touch open-free-router's own entries.
     """
-    text = OMP_MODELS.read_text() if OMP_MODELS.exists() else "providers:\n"
+    from ruamel.yaml import YAML
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
-    # Remove all provider blocks pointing to local proxy
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.indent(mapping=2, sequence=4, offset=2)
+
+    if OMP_MODELS.exists():
+        with open(OMP_MODELS) as f:
+            doc = yaml.load(f)
+    else:
+        doc = None
+    if not isinstance(doc, CommentedMap):
+        doc = CommentedMap()
+    if not isinstance(doc.get("providers"), CommentedMap):
+        doc["providers"] = CommentedMap()
+    providers = doc["providers"]
+
     local_proxy_markers = ("127.0.0.1", "localhost")
-    removed = []
-    # Find all top-level provider names (2-space indent, colon at end)
-    provider_names = re.findall(r'^  (\S+?):\s*$', text, re.MULTILINE)
-    for pname in provider_names:
-        # Extract the block for this provider
-        pattern = rf'^(  {re.escape(pname)}:\n(?:    [^\n]*\n)*)'
-        m = re.search(pattern, text, re.MULTILINE)
-        if m and any(marker in m.group(0) for marker in local_proxy_markers):
-            text = text.replace(m.group(0), "")
-            removed.append(pname)
 
-    # Write fresh entries from registry
+    def _points_to_local_proxy(block) -> bool:
+        if not isinstance(block, dict):
+            return False
+        return any(marker in str(block.get("baseUrl", "")) for marker in local_proxy_markers)
+
+    # Remove ALL provider blocks pointing to the local proxy (including
+    # ones for providers no longer in the registry) so stale entries can't
+    # accumulate; unrelated hand-configured providers are left alone.
+    removed = [pname for pname in list(providers.keys()) if _points_to_local_proxy(providers[pname])]
+    for pname in removed:
+        del providers[pname]
+
     changes = []
     for name, p in reg.providers.items():
         key = _mask_key(p.effective_key)
-        # Remove existing block if any
-        text = re.sub(rf'^  {re.escape(name)}:\n(?:    [^\n]*\n)*', '', text, flags=re.MULTILINE)
-        # Build new block — all providers point to the single-port proxy
-        block = f"\n  {name}:\n    baseUrl: {proxy_url}\n    apiKey: {key}\n    api: openai-completions\n    models:\n"
+        block = CommentedMap()
+        block["baseUrl"] = proxy_url
+        block["apiKey"] = key
+        block["api"] = "openai-completions"
+        model_blocks = CommentedSeq()
         for m in p.models:
-            block += f"      - id: {m.id}\n"
-            block += f"        name: {m.name or m.id}\n"
-            block += f"        reasoning: {'true' if m.reasoning else 'false'}\n"
-            block += f"        input: [text]\n"
-            block += f"        contextWindow: {m.context_window}\n"
-            block += f"        maxTokens: {m.max_tokens}\n"
-            block += f"        cost:\n          input: 0\n          output: 0\n          cacheRead: 0\n          cacheWrite: 0\n"
-        text = text.rstrip() + "\n" + block
+            mblock = CommentedMap()
+            mblock["id"] = m.id
+            mblock["name"] = m.name or m.id
+            mblock["reasoning"] = bool(m.reasoning)
+            mblock["input"] = ["text"]
+            mblock["contextWindow"] = m.context_window
+            mblock["maxTokens"] = m.max_tokens
+            mblock["cost"] = CommentedMap(
+                [("input", 0), ("output", 0), ("cacheRead", 0), ("cacheWrite", 0)]
+            )
+            model_blocks.append(mblock)
+        block["models"] = model_blocks
+        providers[name] = block
         changes.append(name)
 
     if removed:
         print(f"  Removed {len(removed)} stale OMP providers: {', '.join(removed)}")
 
-    text = re.sub(r'\n{3,}', '\n\n', text)
     if do_write:
-        if not text.startswith("providers:"):
-            text = "providers:\n" + text
-        OMP_MODELS.write_text(text)
+        OMP_MODELS.parent.mkdir(parents=True, exist_ok=True)
+        with open(OMP_MODELS, "w") as f:
+            yaml.dump(doc, f)
     return changes
 
 

@@ -13,6 +13,10 @@ from open_free_router.refresh_sources import (
     groq,
     deepseek,
     poolside,
+    nous,
+    sensenova,
+    stepfun,
+    opencode_zen,
 )
 
 # Map registry provider name -> refresh source module
@@ -23,6 +27,10 @@ SOURCE_MAP = {
     "groq": groq,
     "deepseek": deepseek,
     "poolside": poolside,
+    "nous": nous,
+    "sensenova": sensenova,
+    "stepfun": stepfun,
+    "opencode-zen-free": opencode_zen,
 }
 
 

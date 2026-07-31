@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6",
     "requests>=2.31",
+    "ruamel.yaml>=0.18",
 ]
 
 [project.optional-dependencies]

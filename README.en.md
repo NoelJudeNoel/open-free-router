@@ -96,9 +96,11 @@ First `serve` auto-creates config + registry from defaults — no manual setup n
 
 - **Single port 8337** — all agents point to one base_url; routing by model ID
 - **Multi-threaded** — ThreadingHTTPServer, no head-of-line blocking
+- **True streaming passthrough** — `stream: true` requests relay upstream SSE line by line, not buffered and returned all at once
 - **User-Agent** — upstream requests set `open-free-router/0.1` to avoid Cloudflare 1010 blocks
 - **Zero web framework** — uses stdlib `http.server`, no Flask/FastAPI
-- **Pluggable refresh sources** — one module per provider in `refresh_sources/`, exports `fetch(base_url, api_key) → list[ModelInfo]`
+- **Pluggable refresh sources** — one module per provider in `refresh_sources/`, exports `fetch(base_url, api_key) → list[ModelInfo]`. OpenRouter/NVIDIA NIM/Nous/SenseNova/Poolside auto-detect free models from pricing fields; Groq/DeepSeek/StepFun/OpenCode Zen have no pricing field and use a hand-maintained allowlist
+- **Sync preserves hand-edited config** — agent config files (e.g. OMP's `models.yml`) are edited with `ruamel.yaml` (structured, comment-preserving) rather than text substitution, so only entries pointing at the local proxy are added/removed; any other providers, comments, or formatting the user configured by hand are left untouched
 - **Auto Pi sync** — writes `~/.pi/agent/models.json` when Pi config dir exists
 
 ## API Endpoints
