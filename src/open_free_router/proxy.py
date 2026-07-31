@@ -5,11 +5,14 @@ POST /v1/chat/completions → forward to the correct upstream by model ID
 """
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
@@ -17,6 +20,11 @@ from open_free_router.registry import Registry
 
 
 class _ProxyHandler(BaseHTTPRequestHandler):
+    # Nagle's algorithm + delayed ACK otherwise coalesces the small
+    # writes _forward_streaming does per SSE chunk, adding tens of ms of
+    # jitter per hop and defeating the point of streaming at all.
+    disable_nagle_algorithm = True
+
     registry: Registry | None = None
     _model_index: ClassVar[dict[str, str]] = {}  # model_id → provider_name
     _index_lock: ClassVar[threading.Lock] = threading.Lock()
@@ -152,6 +160,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     upstream_model_id = m.effective_upstream_id
                     break
         req["model"] = upstream_model_id
+        is_stream = bool(req.get("stream"))
         data = json.dumps(req).encode()
 
         upstream = (p.upstream_url or p.base_url).rstrip("/")
@@ -162,9 +171,14 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             "Authorization": f"Bearer {key}",
             "User-Agent": "open-free-router/0.1",
         }
+        timeout = getattr(self, "_upstream_timeout", 120)
+
+        if is_stream:
+            self._forward_streaming(url, data, headers, timeout)
+            return
+
         try:
             req_out = Request(url, data=data, headers=headers, method="POST")
-            timeout = getattr(self, "_upstream_timeout", 120)
             with urlopen(req_out, timeout=timeout) as r:
                 resp = r.read()
                 self.send_response(r.status)
@@ -185,6 +199,69 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 self._send_json(code, {"error": str(e.reason)})
         except Exception as e:
             self._send_json(502, {"error": str(e)})
+
+    def _forward_streaming(self, url: str, data: bytes, headers: dict, timeout: int):
+        """Forward a `stream: true` chat completion, relaying upstream SSE
+        chunks to the client as they arrive instead of buffering the whole
+        response (which is what plain urlopen + one wfile.write() would do).
+
+        If the upstream call fails or returns an error status *before* any
+        body has been sent to the client, we still reply with a normal
+        buffered JSON error, matching the non-streaming path. Once we've
+        started relaying chunks, headers are already flushed, so a later
+        upstream failure just ends the stream (mirrors a dropped connection
+        mid-stream rather than a JSON error body).
+        """
+        parts = urlsplit(url)
+        conn_cls = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+        conn = conn_cls(parts.hostname, parts.port, timeout=timeout)
+        path = parts.path + (f"?{parts.query}" if parts.query else "")
+        started = False
+        try:
+            conn.connect()
+            conn.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            conn.request("POST", path, body=data, headers=headers)
+            resp = conn.getresponse()
+
+            if resp.status >= 400:
+                body = resp.read()
+                try:
+                    self._send_json(resp.status, json.loads(body))
+                except json.JSONDecodeError:
+                    self._send_json(resp.status, {"error": body.decode("utf-8", errors="replace")})
+                return
+
+            self.send_response(resp.status)
+            self.send_header("Content-Type", resp.getheader("Content-Type", "text/event-stream"))
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            started = True
+
+            # NOTE: deliberately resp.readline(), not resp.read(N). SSE is
+            # line-oriented, and http.client's chunked-aware read(N) keeps
+            # pulling *subsequent* upstream HTTP chunks from the socket
+            # (blocking on each) until it has N bytes buffered — so
+            # read(4096) on a stream of many small SSE events silently
+            # blocks until the entire response has arrived, defeating
+            # streaming. readline() returns as soon as one line is
+            # available, which is exactly the granularity SSE needs and
+            # keeps latency-to-first-byte low without going byte-at-a-time.
+            while True:
+                line = resp.readline()
+                if not line:
+                    break
+                self.wfile.write(f"{len(line):x}\r\n".encode("ascii"))
+                self.wfile.write(line)
+                self.wfile.write(b"\r\n")
+            self.wfile.write(b"0\r\n\r\n")
+        except Exception as e:
+            if not started:
+                self._send_json(502, {"error": str(e)})
+            # else: client already received a 200 + partial stream; stop
+            # writing and let the connection close, like an upstream drop.
+        finally:
+            conn.close()
 
     def log_message(self, format, *args):
         pass

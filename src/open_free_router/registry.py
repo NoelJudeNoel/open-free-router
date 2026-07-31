@@ -3,7 +3,29 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
+
+# How many timestamped `*.bak-YYYYMMDD-HHMMSS` backups to keep per file.
+# Without this, a long-running `serve` process doing a save on every
+# refresh cycle accumulates one backup per cycle forever.
+BACKUP_RETENTION = 10
+
+
+def prune_backups(path: Path, keep: int = BACKUP_RETENTION) -> None:
+    """Delete all but the ``keep`` most recent timestamped backups of `path`.
+
+    Backups are named ``<path>.bak-<timestamp>`` (see `Registry.save` /
+    `config.save_registry`) and sort correctly by filename since the
+    timestamp format is zero-padded and lexicographically ordered.
+    """
+    pattern = f"{path.name}.bak-*"
+    backups = sorted(path.parent.glob(pattern))
+    for old in backups[:-keep] if keep > 0 else backups:
+        try:
+            old.unlink()
+        except OSError:
+            pass  # best-effort; a failed cleanup shouldn't break the save
 
 
 @dataclass
@@ -147,5 +169,6 @@ class Registry:
         if path.exists():
             backup = path.with_suffix(f".yaml.bak-{datetime.datetime.now():%Y%m%d-%H%M%S}")
             shutil.copy2(path, backup)
+            prune_backups(path)
         with open(path, "w") as f:
             yaml.dump(self.to_dict(), f, default_flow_style=False, allow_unicode=True, sort_keys=False)

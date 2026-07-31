@@ -27,6 +27,18 @@ SOURCE_MAP = {
 
 
 def refresh(reg: Registry, provider_name: str | None = None) -> Dict[str, bool]:
+    """Refresh one or all providers' model lists.
+
+    Returns a dict of provider name -> **did this provider's model list
+    actually change**. This is deliberately *not* "did the fetch succeed" —
+    callers (serve.py's scheduler, ui.py's /api/refresh, cli.py's
+    `refresh` command) all use this dict via ``any(results.values())`` to
+    decide whether a registry save + agent-config sync is warranted. A
+    provider that fetched successfully but returned the same model list
+    it already had must report False here, otherwise every scheduled
+    refresh triggers a full registry backup + rewrite of every agent's
+    synced config file even when nothing changed.
+    """
     results: Dict[str, bool] = {}
 
     providers = [provider_name] if provider_name else list(reg.providers.keys())
@@ -49,6 +61,7 @@ def refresh(reg: Registry, provider_name: str | None = None) -> Dict[str, bool]:
         )
 
         if not new_models:
+            print(f"  ⚠ {name} fetch returned no models")
             results[name] = False
             continue
 
@@ -60,6 +73,6 @@ def refresh(reg: Registry, provider_name: str | None = None) -> Dict[str, bool]:
             print(f"  ✓ {name} updated: {len(new_models)} models")
         else:
             print(f"  ✓ {name} unchanged: {len(new_models)} models")
-        results[name] = True
+        results[name] = changed
 
     return results

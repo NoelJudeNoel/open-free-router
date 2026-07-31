@@ -130,12 +130,47 @@ class TestRegistry:
         loaded = Registry.load(tmp_path / "nonexistent.yaml")
         assert len(loaded.providers) == 0
 
+    def test_save_prunes_preexisting_excess_backups(self, sample_registry, tmp_registry_path):
+        """A save() call must cap total .bak-* files at BACKUP_RETENTION,
+        even if far more already exist from before this fix (e.g. a long-
+        running instance upgraded from an older version)."""
+        from open_free_router.registry import BACKUP_RETENTION
+        tmp_registry_path.write_text("providers: {}\n")
+        for i in range(BACKUP_RETENTION + 10):
+            (tmp_registry_path.parent / f"{tmp_registry_path.name}.bak-{i:04d}").write_text("old")
+        sample_registry.save(tmp_registry_path)
+        backups = list(tmp_registry_path.parent.glob(f"{tmp_registry_path.name}.bak-*"))
+        assert len(backups) <= BACKUP_RETENTION
+
     def test_to_dict_roundtrip(self, sample_registry, tmp_registry_path):
         sample_registry.save(tmp_registry_path)
         loaded = Registry.load(tmp_registry_path)
         loaded.save(tmp_registry_path)
         loaded2 = Registry.load(tmp_registry_path)
         assert len(loaded2.providers) == len(sample_registry.providers)
+
+
+class TestPruneBackups:
+    def test_keeps_most_recent_n(self, tmp_path):
+        from open_free_router.registry import prune_backups
+        target = tmp_path / "registry.yaml"
+        names = [f"{target.name}.bak-{i:04d}" for i in range(15)]
+        for n in names:
+            (tmp_path / n).write_text("x")
+        prune_backups(target, keep=5)
+        remaining = sorted(p.name for p in tmp_path.glob(f"{target.name}.bak-*"))
+        assert remaining == names[-5:]
+
+    def test_keep_zero_or_fewer_files_than_keep_is_noop_safe(self, tmp_path):
+        from open_free_router.registry import prune_backups
+        target = tmp_path / "registry.yaml"
+        (tmp_path / f"{target.name}.bak-0001").write_text("x")
+        prune_backups(target, keep=10)  # only 1 file, nothing to prune
+        assert len(list(tmp_path.glob(f"{target.name}.bak-*"))) == 1
+
+    def test_no_backups_is_noop(self, tmp_path):
+        from open_free_router.registry import prune_backups
+        prune_backups(tmp_path / "registry.yaml", keep=5)  # must not raise
 
 
 class TestProxyHandler:
