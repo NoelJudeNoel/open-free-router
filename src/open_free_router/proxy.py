@@ -201,6 +201,11 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     upstream_model_id = m.effective_upstream_id
                     break
         req["model"] = upstream_model_id
+        # Normalize OpenAI "developer" role to "system" for upstreams that
+        # only accept system/user/assistant (older OpenAI-compatible APIs).
+        for msg in req.get("messages", []):
+            if msg.get("role") == "developer":
+                msg["role"] = "system"
         is_stream = endpoint_suffix != "embeddings" and bool(req.get("stream"))
         data = json.dumps(req).encode()
 
