@@ -66,13 +66,19 @@ proxy:
   port: 8337
 
 ui:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 9057
 
 refresh_interval_hours: 12
 ```
 
 First `serve` auto-creates config + registry from defaults — no manual setup needed.
+
+### Security notes
+
+- `ui.host` and `proxy.host` default to `127.0.0.1` (local only). We do **not** recommend setting either to `0.0.0.0` or exposing them on an untrusted LAN/public network: the dashboard's write endpoints (save config, add/edit providers, trigger refresh) require a local auth token, but the dashboard itself has no HTTPS or fine-grained permissions — it isn't designed for public exposure.
+- On first start, the dashboard generates a random token at `<config dir>/ui.token` (mode 0600). The browser will prompt for it once per session when you save config, add a provider, or trigger a refresh. Requests without a valid token get a 401.
+- `registry.yaml` stores each provider's API key **in plaintext**. That file, and the per-agent config files it syncs into (`~/.hermes`, `~/.pi`, etc.), should be treated as sensitive — don't commit them or share them.
 
 ## Architecture
 
