@@ -20,7 +20,7 @@ from open_free_router.registry import Registry
 # ── Paths ──
 OMP_MODELS = Path.home() / ".omp" / "agent" / "models.yml"
 OMP_CONFIG = Path.home() / ".omp" / "agent" / "config.yml"
-OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
+OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.jsonc"
 HERMES_CONFIG = Path.home() / ".hermes" / "config.yaml"
 PI_MODELS_PATH = Path.home() / ".pi" / "agent" / "models.json"
 BACKUP_DIR = Path.home() / ".openclaw" / "agent-backup" / date.today().isoformat()
@@ -113,7 +113,19 @@ def sync_omp(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.
 
     if OMP_MODELS.exists():
         with open(OMP_MODELS) as f:
-            doc = yaml.load(f)
+            doc = None
+            try:
+                doc = yaml.load(f)
+            except Exception as e:
+                # The existing file is malformed YAML (e.g. an unquoted
+                # model name containing a colon from an older regex-based
+                # sync). Re-parse is impossible, so start from a clean
+                # document rather than aborting the whole sync — the fresh
+                # write below replaces the broken file. Hand-configured
+                # entries in an unparseable file are already unrecoverable;
+                # _backup() already has a copy.
+                print(f"  ⚠ {OMP_MODELS} unparseable ({e}); rewriting from scratch")
+                doc = None
     else:
         doc = None
     if not isinstance(doc, CommentedMap):
