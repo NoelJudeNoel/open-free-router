@@ -6,6 +6,7 @@ import json
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
+from open_free_router.auth import check_auth, get_or_create_token
 from open_free_router.config import Config
 from open_free_router.registry import ModelInfo, ProviderConfig, Registry
 from open_free_router.proxy import rebuild_proxy_index
@@ -16,6 +17,26 @@ class _UIHandler(BaseHTTPRequestHandler):
     cfg: Config | None = None
     reg: Registry | None = None
     config_path: Path | None = None
+    # Local auth token for state-changing requests (POST). Empty string
+    # disables the check — only used by tests that don't care about auth.
+    token: str = ""
+
+    def _require_auth(self) -> bool:
+        """Enforce Authorization: Bearer <token> on state-changing requests.
+
+        Returns True and lets the caller proceed if authorized; otherwise
+        sends a 401 JSON response and returns False.
+        """
+        if not self.token:
+            return True
+        if check_auth(self.headers, self.token):
+            return True
+        self._send_json(401, {
+            "error": "unauthorized",
+            "hint": "send Authorization: Bearer <token> "
+                     "(token file: ~/.config/open-free-router/ui.token)",
+        })
+        return False
 
     def do_GET(self):
         if self.path == "/" or self.path == "/index.html":
@@ -36,14 +57,17 @@ class _UIHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        if self.path not in ("/api/config", "/api/refresh", "/api/providers"):
+            self.send_error(404)
+            return
+        if not self._require_auth():
+            return
         if self.path == "/api/config":
             self._api_config_post()
         elif self.path == "/api/refresh":
             self._api_refresh()
         elif self.path == "/api/providers":
             self._api_providers_post()
-        else:
-            self.send_error(404)
 
     def _serve_file(self, rel: str, content_type: str):
         base = Path(__file__).parent
@@ -214,8 +238,12 @@ def run_ui(cfg: Config, port: int = 9527, reg: Registry | None = None):
     _UIHandler.cfg = cfg
     _UIHandler.reg = reg or Registry.load(cfg.registry_path)
     _UIHandler.config_path = cfg.path
+    config_dir = cfg.path.parent if cfg.path else Path.home() / ".config" / "open-free-router"
+    _UIHandler.token = get_or_create_token(config_dir)
     srv = ThreadingHTTPServer((cfg.ui_host, port), _UIHandler)
     print(f"🌐 Dashboard: http://{cfg.ui_host}:{port}")
+    print(f"🔑 Auth token stored at: {config_dir / 'ui.token'} "
+          f"(dashboard will prompt for it once)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

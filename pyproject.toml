@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6",
     "requests>=2.31",
+    "ruamel.yaml>=0.18",
 ]
 
 [project.optional-dependencies]
@@ -25,3 +26,15 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 open_free_router = ["templates/*", "web_static/static/**/*"]
+
+[tool.pytest.ini_options]
+# e2e_test.py is a manual operational smoke-test script, not an
+# automated test: it executes real network calls against live provider
+# APIs and expects real agent config files (~/.hermes/config.yaml, etc)
+# to exist on the machine running it. Left in tests/ for convenience of
+# co-location, but bare `pytest` / `pytest tests/` must not try to
+# collect it -- it fails at import time on any machine without those
+# real configs present (including CI), aborting collection of every
+# other test in the same run. Run it directly (`python tests/e2e_test.py`)
+# when you actually want to smoke-test a live local install.
+addopts = "--ignore=tests/e2e_test.py"

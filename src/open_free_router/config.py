@@ -75,12 +75,21 @@ def load_registry(registry_path: Path):
 
 
 def save_registry(registry_path: Path, data: dict):
-    """Save registry.yaml with backup."""
+    """Save registry.yaml with backup.
+
+    Note: `Registry.save()` in registry.py is the path actually used by
+    serve/ui/cli — this free function is kept only for API compatibility
+    with any external caller that imports it directly. It shares the same
+    backup-retention behavior so it doesn't reintroduce unbounded .bak
+    accumulation if something does start using it.
+    """
     import shutil, datetime
+    from open_free_router.registry import prune_backups
     if registry_path.exists():
         backup = registry_path.with_suffix(
             f".yaml.bak-{datetime.datetime.now():%Y%m%d-%H%M%S}"
         )
         shutil.copy2(registry_path, backup)
+        prune_backups(registry_path)
     with open(registry_path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)

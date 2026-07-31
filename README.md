@@ -66,13 +66,19 @@ proxy:
   port: 8337
 
 ui:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 9057
 
 refresh_interval_hours: 12
 ```
 
 首次运行 `serve` 自动创建配置文件和注册表，无需手动初始化。
+
+### 安全说明
+
+- `ui.host`、`proxy.host` 默认均为 `127.0.0.1`（仅本机可访问）。**不建议**改成 `0.0.0.0` 或暴露到公网/不受信任的局域网：仪表盘的写操作接口（保存配置、增改 Provider、触发刷新）虽然需要本地 token 鉴权，但仪表盘本身并未做传输加密（无 HTTPS）和更细粒度的权限控制，不是为公网访问设计的。
+- 仪表盘首次启动会在 `<config目录>/ui.token` 生成一个随机 token（权限 0600），浏览器打开仪表盘执行"保存配置 / 添加 Provider / 刷新"等操作时会提示输入一次该 token（本次会话内记住）。没有 token 的请求会被拒绝（401）。
+- `registry.yaml` 中保存的是各 Provider 的**明文** API key（本地文件，权限跟随系统 umask），该文件以及同步到各 Agent 配置目录（`~/.hermes`、`~/.pi` 等）下的文件都应视为敏感文件，不要提交到版本库或分享给他人。
 
 ## 架构
 
@@ -90,9 +96,11 @@ refresh_interval_hours: 12
 
 - **单端口 8337** —— 所有 agent 指向同一个 base_url，按模型 ID 路由
 - **多线程处理** —— ThreadingHTTPServer，避免单请求阻塞影响其他请求
+- **真流式转发** —— `stream: true` 的请求逐行透传上游 SSE，不会缓冲整个响应后一次性返回
 - **User-Agent 标识** —— 转发时带 `open-free-router/0.1`，避免 Cloudflare 1010 拦截
 - **零依赖 Web 框架** —— 使用 Python stdlib `http.server`，无需 Flask/FastAPI
-- **刷新源可插拔** —— `refresh_sources/` 下每 provider 一个模块，导出 `fetch(base_url, api_key) → list[ModelInfo]`
+- **刷新源可插拔** —— `refresh_sources/` 下每 provider 一个模块，导出 `fetch(base_url, api_key) → list[ModelInfo]`。OpenRouter/NVIDIA NIM/Nous/SenseNova/Poolside 按 pricing 字段自动识别免费模型；Groq/DeepSeek/StepFun/OpenCode Zen 无 pricing 字段，用人工维护的白名单
+- **同步保留手工配置** —— 写 Agent 配置文件时（如 OMP 的 `models.yml`）用 `ruamel.yaml` 结构化编辑而非文本替换，只增删指向本地代理的条目，其余手工配置的 provider、注释、格式原样保留
 - **自动 Pi 同步** —— 检测到 `~/.pi/agent/` 目录存在时自动写入 models.json
 
 ## API 端点

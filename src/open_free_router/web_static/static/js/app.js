@@ -1,5 +1,35 @@
 function $(id){ return document.getElementById(id); }
 
+// Auth: the dashboard's write endpoints (POST /api/config, /api/providers,
+// /api/refresh) require a local token — see `ui.token` next to config.yaml.
+// We ask for it once per browser session and remember it in sessionStorage
+// (cleared when the tab closes) so a reload doesn't re-prompt.
+function getAuthToken() {
+  let tok = sessionStorage.getItem('ofr_token');
+  if (!tok) {
+    tok = prompt(
+      'Enter the dashboard auth token (see ui.token next to config.yaml, ' +
+      'or the "Auth token stored at" line printed when the server started):'
+    ) || '';
+    sessionStorage.setItem('ofr_token', tok);
+  }
+  return tok;
+}
+
+// Wrapper around fetch() that attaches the auth header for POST requests
+// and clears the cached token (so the next call re-prompts) on 401.
+async function authFetch(path, options = {}) {
+  const opts = { ...options, headers: { ...(options.headers || {}) } };
+  if ((opts.method || 'GET').toUpperCase() === 'POST') {
+    opts.headers['Authorization'] = 'Bearer ' + getAuthToken();
+  }
+  const r = await fetch(path, opts);
+  if (r.status === 401) {
+    sessionStorage.removeItem('ofr_token');
+  }
+  return r;
+}
+
 // Tabs
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -32,7 +62,7 @@ async function doAction(path, label) {
   el.textContent = 'Running…';
   el.style.color = '#eab308';
   try {
-    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const r = await authFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     const data = await r.json();
     if (r.ok && data.ok) {
       el.textContent = `${label}: ${JSON.stringify(data.results || data)}`;
@@ -90,7 +120,7 @@ $('provider-add').addEventListener('click', async () => {
   const models_raw = prompt('Comma-separated model IDs (leave empty to fetch later):') || '';
   const models = models_raw.split(',').map(s => s.trim()).filter(Boolean);
   const body = { name, base_url, api_key, models, auto_refresh: !!api_key };
-  const r = await fetch('/api/providers', {
+  const r = await authFetch('/api/providers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -148,7 +178,7 @@ function maskApiKeys() {
 
 $('config-save').addEventListener('click', async () => {
   const yaml = $('config-editor').value;
-  const r = await fetch('/api/config', {
+  const r = await authFetch('/api/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ yaml }),
