@@ -52,6 +52,19 @@ class Config:
         self.ui_host = self._raw.get("ui", {}).get("host", "127.0.0.1")
         self.ui_port = int(self._raw.get("ui", {}).get("port", 9057))
 
+        # Optional: git-commit registry.yaml on every save, in addition to
+        # (not instead of) the existing timestamped .bak-file mechanism.
+        # Off by default because registry.yaml holds plaintext provider
+        # API keys -- enabling this creates a permanent local git history
+        # of every key that's ever been configured, including rotated
+        # ones, which is a real behavior change worth opting into
+        # deliberately rather than inheriting silently. The repo (if
+        # enabled) is scoped to just the config directory and only ever
+        # `git add`s registry.yaml by name -- never `-A`/`.` -- so
+        # ui.token and other files in the same directory can't end up
+        # committed by accident.
+        self.registry_git_history = bool(self._raw.get("registry_git_history", False))
+
     @staticmethod
     def _find_config() -> Optional[Path]:
         for p in DEFAULT_CONFIG_PATHS:

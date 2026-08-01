@@ -28,6 +28,49 @@ def prune_backups(path: Path, keep: int = BACKUP_RETENTION) -> None:
             pass  # best-effort; a failed cleanup shouldn't break the save
 
 
+def git_commit_registry(path: Path, message: str = "registry.yaml update") -> None:
+    """Best-effort: commit the current state of `path` to a git repo
+    scoped to its directory, auto-initializing one on first use.
+
+    Layered on top of (not a replacement for) the timestamped .bak-file
+    mechanism above -- gives `git log -p` / `git diff` / `git revert`
+    for registry.yaml history essentially for free, without hand-rolling
+    a second version-control scheme. Opt-in via Config.registry_git_history
+    (see config.py for why it defaults off).
+
+    Deliberately never raises: a save must succeed even if git isn't
+    installed, the directory can't be made a repo, or anything else
+    about this goes wrong. Only ever `git add`s `path` by name, never
+    `-A`/`.`, so other files in the same directory (notably ui.token)
+    can't end up committed by accident.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        return
+
+    repo_dir = path.parent
+    kwargs = dict(cwd=repo_dir, capture_output=True, timeout=10)
+    try:
+        if not (repo_dir / ".git").exists():
+            subprocess.run(["git", "init", "-q"], check=True, **kwargs)
+            subprocess.run(["git", "config", "user.email", "open-free-router@localhost"],
+                            check=True, **kwargs)
+            subprocess.run(["git", "config", "user.name", "open-free-router"], check=True, **kwargs)
+            gitignore = repo_dir / ".gitignore"
+            if not gitignore.exists():
+                gitignore.write_text("# open-free-router: only registry.yaml is meant to be tracked here.\n*\n!registry.yaml\n!.gitignore\n")
+                subprocess.run(["git", "add", ".gitignore"], check=True, **kwargs)
+                subprocess.run(["git", "commit", "-q", "-m", "open-free-router: init history repo"], **kwargs)
+        subprocess.run(["git", "add", path.name], check=True, **kwargs)
+        # A no-op commit (content identical to HEAD) exits non-zero; that's
+        # expected and not an error, hence no check=True here.
+        subprocess.run(["git", "commit", "-q", "-m", message], **kwargs)
+    except Exception:
+        pass  # best-effort; history tracking must never break a save
+
+
 @dataclass
 class ModelInfo:
     id: str  # Short display ID (e.g. "glm-5.2", "deepseek-chat")
@@ -162,7 +205,7 @@ class Registry:
             data = {}
         return cls(data)
 
-    def save(self, path: Path):
+    def save(self, path: Path, git_history: bool = False):
         import shutil, datetime
         import yaml
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -172,3 +215,5 @@ class Registry:
             prune_backups(path)
         with open(path, "w") as f:
             yaml.dump(self.to_dict(), f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        if git_history:
+            git_commit_registry(path)

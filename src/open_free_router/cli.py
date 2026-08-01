@@ -55,7 +55,7 @@ def cmd_refresh(args):
 
     changed = any(v for v in results.values())
     if changed and not args.dry_run:
-        reg.save(cfg.registry_path)
+        reg.save(cfg.registry_path, git_history=cfg.registry_git_history)
         print("\n✔ registry updated")
     elif not changed:
         print("\n✓ no changes")
@@ -104,7 +104,7 @@ def cmd_add(args):
         refresh_method="api" if args.auto_refresh else "manual",
     )
     reg.add_provider(p)
-    reg.save(cfg.registry_path)
+    reg.save(cfg.registry_path, git_history=cfg.registry_git_history)
     print(f"✔ Added provider '{name}' with {len(models)} models")
 
 
@@ -140,7 +140,7 @@ def cmd_setup(args):
             print(f"    ✓ key saved")
 
     if changed:
-        reg.save(cfg.registry_path)
+        reg.save(cfg.registry_path, git_history=cfg.registry_git_history)
         n = sum(1 for p in reg.providers.values() if p.api_key)
         print(f"\n✔ Saved {cfg.registry_path} — {n}/{len(reg.providers)} providers have keys")
         print("  Run  open-free-router serve  to start.")
