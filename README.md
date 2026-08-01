@@ -70,6 +70,14 @@ ui:
   port: 9057
 
 refresh_interval_hours: 12
+
+# 可选，默认 false。开启后每次 registry.yaml 保存都会额外提交到一个本地
+# git 仓库（自动 git init 在 registry.yaml 所在目录，从不 push 到任何远程），
+# 可以用 `git log -p registry.yaml` 看清楚某次刷新具体改了什么、
+# `git revert` 回滚。默认关闭：registry.yaml 里是明文 API key，开启这个
+# 等于给"每一个用过的 key"建立一份永久本地历史，这是一个值得你主动决定的
+# 行为变化，而不是默认帮你做。
+registry_git_history: false
 ```
 
 首次运行 `serve` 自动创建配置文件和注册表，无需手动初始化。
@@ -78,7 +86,8 @@ refresh_interval_hours: 12
 
 - `ui.host`、`proxy.host` 默认均为 `127.0.0.1`（仅本机可访问）。**不建议**改成 `0.0.0.0` 或暴露到公网/不受信任的局域网：仪表盘的写操作接口（保存配置、增改 Provider、触发刷新）虽然需要本地 token 鉴权，但仪表盘本身并未做传输加密（无 HTTPS）和更细粒度的权限控制，不是为公网访问设计的。
 - 仪表盘首次启动会在 `<config目录>/ui.token` 生成一个随机 token（权限 0600），浏览器打开仪表盘执行"保存配置 / 添加 Provider / 刷新"等操作时会提示输入一次该 token（本次会话内记住）。没有 token 的请求会被拒绝（401）。
-- `registry.yaml` 中保存的是各 Provider 的**明文** API key（本地文件，权限跟随系统 umask），该文件以及同步到各 Agent 配置目录（`~/.hermes`、`~/.pi` 等）下的文件都应视为敏感文件，不要提交到版本库或分享给他人。
+- `registry.yaml` 中保存的是各 Provider 的**明文** API key（本地文件，权限跟随系统 umask），该文件以及同步到各 Agent 配置目录（`~/.hermes`、`~/.pi` 等）下的文件都应视为敏感文件，不要提交到版本库或分享给他人。开启 `registry_git_history` 后会多一个**本地**（不会 push）的 `.git` 目录持有同样的明文历史，同样不要把这个目录分享出去或加进公开仓库。
+- 对于内置支持的 Provider（`open-free-router` 自带 `refresh_sources/` 模块的那几个），`upstream_url` 会被固定为 `registry.default.yaml` 里的官方地址——即使是携带了正确 token 的 `POST /api/providers` 请求，提交的 `upstream_url` 也会被忽略并强制改回官方值，响应里会带 `upstream_url_pinned: true` 提示。这是为了避免"即使拿到了本地 token，也无法把内置 Provider 的请求重定向到别的地址、进而让代理把真实 key 发过去"。自定义添加的 Provider（不在内置列表里的）不受此限制，可以自由填写任意 `upstream_url`。
 
 ## 架构
 
@@ -101,6 +110,9 @@ refresh_interval_hours: 12
 - **零依赖 Web 框架** —— 使用 Python stdlib `http.server`，无需 Flask/FastAPI
 - **刷新源可插拔** —— `refresh_sources/` 下每 provider 一个模块，导出 `fetch(base_url, api_key) → list[ModelInfo]`。OpenRouter/NVIDIA NIM/Nous/SenseNova/Poolside 按 pricing 字段自动识别免费模型；Groq/DeepSeek/StepFun/OpenCode Zen 无 pricing 字段，用人工维护的白名单
 - **同步保留手工配置** —— 写 Agent 配置文件时（如 OMP 的 `models.yml`）用 `ruamel.yaml` 结构化编辑而非文本替换，只增删指向本地代理的条目，其余手工配置的 provider、注释、格式原样保留
+- **调度器容错** —— 定时刷新循环内任意一步抛出异常都不会杀死后台线程，会记录完整堆栈到 stderr 并在下一个周期重试；仪表盘能通过 `/api/status` 看到最近一次是否失败，避免"自动刷新静默失效、用户毫无感知"
+- **变化才写盘** —— 只有当 `refresh()` 检测到真实的模型列表变化时，才会重写 registry 备份和所有 Agent 的同步文件；一次没有变化的常规刷新不会产生任何多余的磁盘写入
+- **已知 Provider 的 upstream_url 被锚定** —— 内置支持的 Provider，其 `upstream_url` 固定读取自 `registry.default.yaml`，不接受 API/UI 提交的覆盖值，从根上避免"代理把真实 key 发到被篡改的地址"这类问题
 - **自动 Pi 同步** —— 检测到 `~/.pi/agent/` 目录存在时自动写入 models.json
 
 ## API 端点

@@ -192,8 +192,39 @@ class Registry:
         p.models = models
         return True
 
-    def add_provider(self, cfg: ProviderConfig):
+    def add_provider(self, cfg: ProviderConfig) -> bool:
+        """Add or replace a provider. Returns True if a submitted
+        upstream_url for a known provider was overridden by the pinned
+        canonical value (see docstring below for why), so callers like
+        ui.py can surface that to whoever made the request instead of
+        silently discarding what they typed.
+
+        For providers we have a curated refresh_sources module for (see
+        refresh.SOURCE_MAP), upstream_url is pinned to the canonical
+        value shipped in registry.default.yaml rather than trusting
+        whatever the caller passed in. Phase 0's UI auth token gates
+        *who* can call this; this closes *what* they can set for a
+        known provider even with valid auth -- upstream_url simply
+        isn't attacker-influenceable input for those names anymore,
+        rather than merely being harder to reach. Custom/user-added
+        providers (not in SOURCE_MAP) keep full freedom to set any
+        upstream_url, since that's the whole point of being able to
+        add a provider by hand.
+
+        Import is deferred (not at module top) to avoid a circular
+        import: refresh.py imports ModelInfo from this module.
+        """
+        from open_free_router.refresh import SOURCE_MAP, CANONICAL_UPSTREAM_URLS
+        pinned = False
+        if cfg.name in SOURCE_MAP:
+            canonical = CANONICAL_UPSTREAM_URLS.get(cfg.name)
+            if canonical and cfg.upstream_url != canonical:
+                print(f"  ⚠ ignoring submitted upstream_url for known provider "
+                      f"'{cfg.name}' ({cfg.upstream_url!r}); pinned to {canonical!r}")
+                cfg.upstream_url = canonical
+                pinned = True
         self.providers[cfg.name] = cfg
+        return pinned
 
     @classmethod
     def load(cls, path: Path) -> "Registry":

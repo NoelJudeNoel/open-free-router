@@ -70,6 +70,15 @@ ui:
   port: 9057
 
 refresh_interval_hours: 12
+
+# Optional, default false. When enabled, every registry.yaml save also
+# commits to a local git repo (auto `git init`'d in registry.yaml's
+# directory, never pushed anywhere), so `git log -p registry.yaml` shows
+# exactly what a given refresh changed and `git revert` can undo it.
+# Off by default: registry.yaml holds plaintext API keys, so enabling
+# this creates a permanent local history of every key that's ever been
+# configured -- a deliberate opt-in, not a default-on behavior.
+registry_git_history: false
 ```
 
 First `serve` auto-creates config + registry from defaults — no manual setup needed.
@@ -78,7 +87,8 @@ First `serve` auto-creates config + registry from defaults — no manual setup n
 
 - `ui.host` and `proxy.host` default to `127.0.0.1` (local only). We do **not** recommend setting either to `0.0.0.0` or exposing them on an untrusted LAN/public network: the dashboard's write endpoints (save config, add/edit providers, trigger refresh) require a local auth token, but the dashboard itself has no HTTPS or fine-grained permissions — it isn't designed for public exposure.
 - On first start, the dashboard generates a random token at `<config dir>/ui.token` (mode 0600). The browser will prompt for it once per session when you save config, add a provider, or trigger a refresh. Requests without a valid token get a 401.
-- `registry.yaml` stores each provider's API key **in plaintext**. That file, and the per-agent config files it syncs into (`~/.hermes`, `~/.pi`, etc.), should be treated as sensitive — don't commit them or share them.
+- `registry.yaml` stores each provider's API key **in plaintext**. That file, and the per-agent config files it syncs into (`~/.hermes`, `~/.pi`, etc.), should be treated as sensitive — don't commit them or share them. If `registry_git_history` is enabled, the same plaintext history lives in a **local-only** `.git` directory alongside it — treat that the same way.
+- For built-in providers (the ones with a `refresh_sources/` module shipped in this repo), `upstream_url` is pinned to the value in `registry.default.yaml`. Even an authenticated `POST /api/providers` with a valid token can't override it — the submitted value is ignored and the response includes `upstream_url_pinned: true`. This closes the path where a valid-but-malicious write could redirect a built-in provider's traffic (and the real API key sent with it) to an attacker's server. Custom providers you add yourself are unaffected and can point at any URL.
 
 ## Architecture
 
@@ -101,6 +111,9 @@ First `serve` auto-creates config + registry from defaults — no manual setup n
 - **Zero web framework** — uses stdlib `http.server`, no Flask/FastAPI
 - **Pluggable refresh sources** — one module per provider in `refresh_sources/`, exports `fetch(base_url, api_key) → list[ModelInfo]`. OpenRouter/NVIDIA NIM/Nous/SenseNova/Poolside auto-detect free models from pricing fields; Groq/DeepSeek/StepFun/OpenCode Zen have no pricing field and use a hand-maintained allowlist
 - **Sync preserves hand-edited config** — agent config files (e.g. OMP's `models.yml`) are edited with `ruamel.yaml` (structured, comment-preserving) rather than text substitution, so only entries pointing at the local proxy are added/removed; any other providers, comments, or formatting the user configured by hand are left untouched
+- **Scheduler resilience** — an exception anywhere in a refresh cycle doesn't kill the background thread; it's logged with a full traceback and retried next interval. `/api/status` exposes whether the last cycle failed, so "auto-refresh silently died" is something you can actually notice.
+- **Writes gated on real change** — registry backups and every agent's synced config file are only rewritten when `refresh()` finds an actual model-list change, not on every cycle regardless.
+- **Built-in providers' upstream_url is pinned** — read from `registry.default.yaml`, not accepted from API/UI submissions, closing the path where a proxy could be redirected to send a real API key to an attacker's server.
 - **Auto Pi sync** — writes `~/.pi/agent/models.json` when Pi config dir exists
 
 ## API Endpoints

@@ -34,6 +34,37 @@ SOURCE_MAP = {
 }
 
 
+def _load_canonical_upstream_urls() -> Dict[str, str]:
+    """Canonical upstream_url for each curated (SOURCE_MAP) provider,
+    read from the shipped registry.default.yaml.
+
+    This is the actual source of truth for "what URL does this known
+    provider use" -- deriving from it instead of hand-maintaining a
+    second copy of the same mapping here means the two can't drift
+    apart. Used by Registry.add_provider() to pin upstream_url for
+    known providers regardless of what a caller (UI/CLI) submits: an
+    authenticated-but-malicious or simply mistaken POST /api/providers
+    can no longer redirect a known provider's upstream_url to an
+    attacker's server, since the submitted value for a known name is
+    ignored outright rather than merely gated behind auth.
+    """
+    import yaml
+    from pathlib import Path
+    default_path = Path(__file__).parent / "registry.default.yaml"
+    try:
+        data = yaml.safe_load(default_path.read_text()) or {}
+    except OSError:
+        return {}
+    return {
+        name: cfg["upstream_url"]
+        for name, cfg in data.items()
+        if isinstance(cfg, dict) and cfg.get("upstream_url")
+    }
+
+
+CANONICAL_UPSTREAM_URLS: Dict[str, str] = _load_canonical_upstream_urls()
+
+
 def refresh(reg: Registry, provider_name: str | None = None) -> Dict[str, bool]:
     """Refresh one or all providers' model lists.
 
