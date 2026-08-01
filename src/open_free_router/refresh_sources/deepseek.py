@@ -12,6 +12,12 @@ from open_free_router.registry import ModelInfo
 SOURCE_NAME = "deepseek"
 
 # DeepSeek free-tier model ids. Keep conservative; add/remove as platform changes.
+#
+# NOT independently re-verified as part of the audit that fixed
+# stepfun.py/opencode_zen.py's stale entries -- freshness unknown as of
+# 2026-08-01. If you have a DeepSeek API key, running
+# `curl https://api.deepseek.com/v1/models -H "Authorization: Bearer $KEY"`
+# and diffing against this list would close that gap.
 KNOWN_FREE = [
     "deepseek-chat",
     "deepseek-reasoner",
