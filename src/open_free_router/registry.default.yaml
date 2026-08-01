@@ -1,12 +1,3 @@
-deepseek:
-  upstream_url: https://api.deepseek.com/v1
-  auto_refresh: false
-  refresh_method: manual
-  api_key: ''
-  models:
-  - id: deepseek-chat
-  - id: deepseek-reasoner
-  prefix: ds
 google-ai-studio:
   upstream_url: https://generativelanguage.googleapis.com/v1beta
   auto_refresh: false
