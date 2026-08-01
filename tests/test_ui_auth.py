@@ -5,11 +5,34 @@ import json
 import stat
 import threading
 import time
+from unittest.mock import patch
+
+import pytest
 
 from open_free_router import ui
 from open_free_router.auth import check_auth, get_or_create_token
 from open_free_router.config import Config
 from open_free_router.registry import Registry
+import open_free_router.sync as _sync
+
+
+@pytest.fixture(autouse=True)
+def _isolate_sync_paths(tmp_path):
+    """Redirect every agent-config path the UI's POST handlers reach (via
+    write_pi_models / sync_all) to tmp_path, so a test that POSTs to
+    /api/providers or /api/refresh can't overwrite the real ~/.pi,
+    ~/.omp, ~/.config/opencode, ~/.hermes, or the real backup dir.
+    """
+    paths = {
+        "PI_MODELS_PATH": tmp_path / "pi.json",
+        "OMP_MODELS": tmp_path / "omp.yml",
+        "OMP_CONFIG": tmp_path / "omp_cfg.yml",
+        "OPENCODE_CONFIG": tmp_path / "opencode.json",
+        "HERMES_CONFIG": tmp_path / "hermes.yaml",
+        "BACKUP_DIR": tmp_path / "backups",
+    }
+    with patch.multiple(_sync, **paths):
+        yield
 
 
 class _FakeHeaders(dict):
