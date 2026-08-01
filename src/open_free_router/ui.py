@@ -17,6 +17,7 @@ class _UIHandler(BaseHTTPRequestHandler):
     cfg: Config | None = None
     reg: Registry | None = None
     config_path: Path | None = None
+    scheduler_status: dict | None = None
     # Local auth token for state-changing requests (POST). Empty string
     # disables the check — only used by tests that don't care about auth.
     token: str = ""
@@ -86,6 +87,10 @@ class _UIHandler(BaseHTTPRequestHandler):
     def _api_status(self):
         status = {
             "providers": [],
+            # None if the daemon isn't running the scheduler in this
+            # process (e.g. tests instantiate _UIHandler standalone), or
+            # if it hasn't completed a first cycle yet.
+            "scheduler": self.scheduler_status or {"last_ok": None, "last_error": None},
         }
         for name, p in (self.reg.providers if self.reg else {}).items():
             status["providers"].append({
@@ -166,7 +171,7 @@ class _UIHandler(BaseHTTPRequestHandler):
         if changed:
             assert self.reg is not None
             assert self.cfg is not None
-            self.reg.save(self.cfg.registry_path)
+            self.reg.save(self.cfg.registry_path, git_history=self.cfg.registry_git_history)
         rebuild_proxy_index()
         if self.cfg:
             proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
@@ -214,13 +219,21 @@ class _UIHandler(BaseHTTPRequestHandler):
             auto_refresh=bool(data.get("auto_refresh", False)),
             refresh_method=data.get("refresh_method", "api" if data.get("auto_refresh") else "manual"),
         )
-        self.reg.add_provider(p)
-        self.reg.save(self.cfg.registry_path)
+        pinned = self.reg.add_provider(p)
+        self.reg.save(self.cfg.registry_path, git_history=self.cfg.registry_git_history)
         rebuild_proxy_index()
         if self.cfg:
             proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
             write_pi_models(self.reg, proxy_url=proxy_url)
-        self._send_json(200, {"ok": True, "provider": name, "models": len(models)})
+        resp = {"ok": True, "provider": name, "models": len(models)}
+        if pinned:
+            resp["upstream_url_pinned"] = True
+            resp["upstream_url"] = p.upstream_url
+            resp["note"] = (
+                f"'{name}' is a known provider; the submitted upstream_url was "
+                f"ignored and pinned to the canonical value shown above."
+            )
+        self._send_json(200, resp)
 
     def _send_json(self, code: int, obj: dict):
         body = json.dumps(obj, indent=2).encode()
@@ -234,10 +247,11 @@ class _UIHandler(BaseHTTPRequestHandler):
         pass
 
 
-def run_ui(cfg: Config, port: int = 9527, reg: Registry | None = None):
+def run_ui(cfg: Config, port: int = 9527, reg: Registry | None = None, scheduler_status: dict | None = None):
     _UIHandler.cfg = cfg
     _UIHandler.reg = reg or Registry.load(cfg.registry_path)
     _UIHandler.config_path = cfg.path
+    _UIHandler.scheduler_status = scheduler_status
     config_dir = cfg.path.parent if cfg.path else Path.home() / ".config" / "open-free-router"
     _UIHandler.token = get_or_create_token(config_dir)
     srv = ThreadingHTTPServer((cfg.ui_host, port), _UIHandler)

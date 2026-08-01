@@ -54,6 +54,18 @@ async function loadStatus() {
       <div class="pmeta">${p.auto_refresh ? 'auto-refresh' : 'manual'}</div>
     </div>
   `).join('') || '<div class="status-line">No providers configured</div>';
+
+  const sched = data.scheduler || {};
+  const warn = $('scheduler-warning');
+  if (sched.last_error) {
+    $('scheduler-warning-text').textContent =
+      'The last scheduled refresh raised an exception (see server logs for the ' +
+      'full traceback). Auto-refresh will retry on the next interval, but ' +
+      'model lists may be stale until then.';
+    warn.style.display = 'block';
+  } else {
+    warn.style.display = 'none';
+  }
 }
 
 // Actions
