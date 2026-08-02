@@ -15,10 +15,28 @@ SOURCE_NAME = "google-ai-studio"
 # Google does not publish a stable single free-models-only endpoint here,
 # so this source uses a conservative known-free set keyed from provider docs /
 # community tracking. Adjust as Google changes free tiers.
+#
+# gemini-2.5-pro REMOVED 2026-08-02: multiple independent sources from
+# Apr-Jul 2026 confirm Google moved Pro-series models (2.5 Pro, 3.x Pro)
+# to paid-only on the Gemini Developer API as of 2026-04-01. This is a
+# structural gap in this file's design worth naming explicitly: unlike
+# nous.py/sensenova.py, there's no live pricing signal to auto-detect
+# this kind of change from, and unlike nvidia_nim.py, there's no
+# provider-published catalog page with a "Free" filter either -- the
+# free/paid split here lives only in prose documentation, so it can
+# only be caught by periodic manual research like this, not by any
+# live API check even with a real key.
+#
+# gemini-2.5-flash / gemini-2.5-flash-lite NOT re-verified as part of
+# this same pass: recent (as of 2026-07-16) sources reference "Gemini
+# 3.5 Flash Standard" / "Gemini 3.1 Flash-Lite Standard" as the current
+# free lineup, suggesting the 2.5 generation may already be superseded
+# -- but no source found gave an exact, confirmed API model-ID string
+# for the 3.x generation, so these two entries are left as-is rather
+# than guessed-replaced with an unconfirmed ID.
 KNOWN_FREE = [
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
-    "gemini-2.5-pro",
     "gemma-3-27b-it",
 ]
 

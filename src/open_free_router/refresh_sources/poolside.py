@@ -15,10 +15,19 @@ from open_free_router.registry import ModelInfo
 
 SOURCE_NAME = "poolside"
 
-# Poolside free model ids
+# Poolside free model ids.
+#
+# poolside/laguna-m.1 added 2026-08-02: confirmed free via multiple
+# independent sources (VentureBeat, OpenRouter's own listing, a Puter.js
+# tutorial with a working code sample) as of Poolside's own proprietary
+# API, not just OpenRouter. Caveat worth keeping in mind: Poolside's own
+# wording describes this as free "during a limited-time preview," not a
+# permanent commitment -- unlike laguna-s-2.1/xs-2.1 below, which have
+# no such caveat in the sources found for them.
 KNOWN_FREE = [
     "poolside/laguna-s-2.1",
     "poolside/laguna-xs-2.1",
+    "poolside/laguna-m.1",
 ]
 
 

@@ -15,7 +15,6 @@ google-ai-studio:
   models:
   - id: gemini-2.5-flash
   - id: gemini-2.5-flash-lite
-  - id: gemini-2.5-pro
   prefix: gai
 groq:
   upstream_url: https://api.groq.com/openai/v1
@@ -27,10 +26,9 @@ groq:
     upstream_id: llama-3.3-70b-versatile
   - id: llama-3.1-8b
     upstream_id: llama-3.1-8b-instant
-  - id: gemma2-9b
-    upstream_id: gemma2-9b-it
-  - id: mixtral-8x7b
-    upstream_id: mixtral-8x7b-32768
+  - id: gpt-oss-20b
+    upstream_id: openai/gpt-oss-20b
+    reasoning: true
   prefix: gq
 nvidia-nim:
   upstream_url: https://integrate.api.nvidia.com/v1
@@ -72,6 +70,9 @@ poolside:
     reasoning: true
   - id: laguna-xs:free
     upstream_id: poolside/laguna-xs-2.1
+    reasoning: true
+  - id: laguna-m:free
+    upstream_id: poolside/laguna-m.1
     reasoning: true
   prefix: ps
 opencode-zen-free:

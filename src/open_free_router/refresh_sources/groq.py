@@ -13,21 +13,27 @@ SOURCE_NAME = "groq"
 
 # Known free Groq models. Groq free tier changes occasionally; keep list conservative.
 #
-# NOT independently re-verified as part of the audit that fixed
-# stepfun.py/opencode_zen.py's stale entries (see refresh.py's provider
-# review) -- this list's freshness is unknown as of 2026-08-01. Same
-# structural risk applies here as anywhere else in this file's design:
-# there's no pricing field to auto-detect from, so a model can silently
-# leave Groq's free tier (or a new one appear) without this list
-# noticing. If you have a Groq API key, running
+# Re-audited 2026-08-02 via web research (Groq's own docs code samples +
+# multiple independent third-party trackers from Apr-Jun 2026), not a
+# live authenticated /v1/models call -- this sandbox can't reach Groq's
+# API. Confidence varies per entry, noted inline. Run
 # `curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $KEY"`
-# and diffing the result against this list would close that gap.
+# against a real key to confirm before fully trusting this list.
+#
+# Removed since the previous version of this list (multiple independent
+# 2026 sources list Groq's current free lineup with zero mentions of
+# either, and Mixtral in particular is a well-documented Groq
+# deprecation):
+#   - gemma2-9b-it
+#   - mixtral-8x7b-32768
 KNOWN_FREE = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it",
-    "mixtral-8x7b-32768",
-    "llama-guard-3-8b",
+    "llama-3.3-70b-versatile",  # confirmed current: appears in Groq's own official docs code samples
+    "llama-3.1-8b-instant",     # confirmed current: appears in Groq's own official docs code samples
+    "llama-guard-3-8b",         # LOWER CONFIDENCE: absent from "top model" trackers, but those
+                                 # typically exclude moderation models anyway, so absence isn't as
+                                 # strong a signal here as it was for gemma2/mixtral above
+    "openai/gpt-oss-20b",       # confirmed current: exact ID copied verbatim from Groq's own
+                                 # official docs code sample (console.groq.com/docs/overview)
 ]
 
 
