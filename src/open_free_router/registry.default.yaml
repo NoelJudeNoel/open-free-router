@@ -43,11 +43,23 @@ nous:
   auto_refresh: false
   refresh_method: nous_api
   api_key: ''
-  models:
-  - id: ling-3.0-flash:free
-    upstream_id: inclusionai/ling-3.0-flash:free
-  - id: step-3.7-flash:free
-    upstream_id: stepfun/step-3.7-flash:free
+  # Both manual entries previously here (ling-3.0-flash:free ->
+  # inclusionai/ling-3.0-flash:free, step-3.7-flash:free ->
+  # stepfun/step-3.7-flash:free) were removed 2026-08-02: neither was
+  # ever verified against a real, untruncated Nous /v1/models response
+  # (a truncated real response was checked earlier and didn't cover
+  # either ID either way), and the first was confirmed broken via a
+  # real production Hermes session -- Nous's own API returned a live
+  # 404 "Model ... not found" for the resolved upstream_id, meaning our
+  # proxy correctly routed the request but Nous itself rejected it.
+  # Advertising a model as free that 404s on the real upstream is worse
+  # than not listing it at all (a clean 403 "not in whitelist" is a much
+  # better failure mode for the caller than an accepted-then-rejected
+  # round trip). Left empty rather than guess-replaced -- add real
+  # verified entries here once a full /v1/models response from a real
+  # Nous key is available to check against, same process used to fix
+  # stepfun.py/opencode_zen.py's stale entries.
+  models: []
   prefix: ns
 poolside:
   upstream_url: https://inference.poolside.ai/v1
@@ -110,8 +122,17 @@ sensenova:
   refresh_method: sensenova_api
   api_key: ''
   models:
-  - id: v4-flash
-    upstream_id: deepseek-v4-flash
+  # Renamed from local short-id "v4-flash" to match SenseNova's own
+  # real model name exactly (confirmed via a real /v1/models response
+  # earlier: SenseNova's own catalog calls this "deepseek-v4-flash",
+  # not "v4-flash") -- id == upstream_id now, so upstream_id is dropped
+  # rather than kept as a redundant duplicate. The previous short-id
+  # was gratuitous local renaming with no real benefit and cost a real
+  # user a failed request in production: they reasonably guessed the
+  # display name would match the model's actual name
+  # ("nova/deepseek-v4-flash") and got a 403 because our registry only
+  # recognized "nova/v4-flash".
+  - id: deepseek-v4-flash
   - id: glm-5.2
   prefix: nova
 stepfun:
