@@ -40,19 +40,35 @@ pip install -e .
 | `open-free-router add NAME --base-url URL [--model ID] [--auto-refresh]` | 添加 provider |
 | `open-free-router ui` | 单独启动 Web 仪表盘（调试用） |
 
-## 快速开始
+## 新手快速上手
+
+> 第一次用？**直接看 《[快速上手手把手教程](docs/QUICKSTART.md)》**，大约 10 分钟，
+> 从环境检查到接入你的 Agent 全程无门槛。下面是最短路径：
 
 ```bash
-# 1. 首次运行自动创建配置，直接启动
+# 1. 安装（一键）
+bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
+
+# 2. 启动全部服务（proxy:8337 + UI:9057 + 定时刷新:12h）
 open-free-router serve
 
-# 2. 在新终端中填入 API key
+# 3. 另开一个终端，填入你想用的 provider 的 API key（其余回车跳过）
 open-free-router setup
 
-# 3. 把 Agent 的 base_url 指向 http://127.0.0.1:8337/v1
+# 4. 验证代理正常返回模型列表
+curl http://127.0.0.1:8337/v1/models
 
-# 4. 打开仪表盘：http://127.0.0.1:9057
+# 5. 把你的 Agent base_url 指向 http://127.0.0.1:8337/v1，选一个模型 ID
+
+# 6.（可选）一键同步模型列表到 OpenCode / OMP / Pi / Hermes
+open-free-router sync
 ```
+
+浏览器打开仪表盘：<http://127.0.0.1:9057>（首次做写操作会提示输入 `~/.config/open-free-router/ui.token` 里的 token）
+
+**遇到问题？** 常见报错（端口占用、命令找不到、403/404、401）的解决办法都在
+《快速上手》第 9 节。
+
 
 ## 配置文件
 

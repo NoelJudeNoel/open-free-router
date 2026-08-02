@@ -40,19 +40,36 @@ pip install -e .
 | `open-free-router add NAME --base-url URL [--model ID] [--auto-refresh]` | Add a provider |
 | `open-free-router ui` | Web dashboard standalone (debug) |
 
-## Quick Start
+## Quick Start (first-time users)
+
+> New here? Read **[the step-by-step walkthrough](docs/QUICKSTART.en.md)** — about 10 minutes,
+> from environment checks to connecting your agents, no prior knowledge assumed.
+> Shortest path below:
 
 ```bash
-# 1. Auto-creates config on first run, just start
+# 1. Install (one-liner)
+bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
+
+# 2. Start everything (proxy:8337 + UI:9057 + scheduler:12h)
 open-free-router serve
 
-# 2. In another terminal, enter API keys
+# 3. In another terminal, enter API keys for the providers you want (Enter to skip)
 open-free-router setup
 
-# 3. Point all your agents to http://127.0.0.1:8337/v1
+# 4. Verify the proxy returns the model list
+curl http://127.0.0.1:8337/v1/models
 
-# 4. Open dashboard: http://127.0.0.1:9057
+# 5. Point your agent's base_url at http://127.0.0.1:8337/v1 and pick a model ID
+
+# 6. (Optional) sync the model list to OpenCode / OMP / Pi / Hermes
+open-free-router sync
 ```
+
+Dashboard: <http://127.0.0.1:9057> (the first write action prompts for the token in `~/.config/open-free-router/ui.token`)
+
+**Trouble?** Solutions to common errors (port in use, command not found,
+403/404, 401) are in section 9 of the walkthrough.
+
 
 ## Config
 
