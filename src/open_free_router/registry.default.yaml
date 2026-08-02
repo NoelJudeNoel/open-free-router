@@ -28,7 +28,7 @@ nvidia-nim:
   models:
   - id: minimax-m3
     upstream_id: minimaxai/minimax-m3
-  - id: nemotron-3-ultra
+  - id: nemotron-3-ultra-550b-a55b
     upstream_id: nvidia/nemotron-3-ultra-550b-a55b
   - id: step-3.7-flash
     reasoning: true
