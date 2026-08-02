@@ -31,15 +31,22 @@ SOURCE_NAME = "google-ai-studio"
 # provider's stated future deprecation date is not a floor you can rely
 # on for "still definitely works today."
 #
-# Replaced with gemini-3.5-flash / gemini-3.5-flash-lite: exact IDs
-# confirmed via Google's own official docs (ai.google.dev), which
-# explicitly instruct migrating 2.5-flash-lite callers to
-# "gemini-3.5-flash-lite". gemini-3.5-flash's free-tier availability
-# has an explicit citation (a third-party model catalog citing "Free
-# listing since May 19, 2026"); gemini-3.5-flash-lite's free status is
-# inferred by continuity (Flash-Lite has consistently been Google's
-# free/cheap tier) rather than an equally explicit citation -- slightly
-# lower confidence on that one specifically.
+# Replaced with gemini-3.6-flash / gemini-3.5-flash-lite (CORRECTION: an
+# earlier version of this list used gemini-3.5-flash, but a deeper research
+# pass found that gemini-3.6-flash is the current Flash main-line default,
+# released 2026-07-21 and now superseding 3.5 Flash as the default). The
+# version-number asymmetry (Flash at 3.6, Flash-Lite still at 3.5) is
+# intentional on Google's part -- explicitly called out by multiple
+# independent sources as Google's own naming, NOT a typo -- so Flash-Lite
+# stays on 3.5.
+#
+# gemini-3.6-flash free-tier availability has an explicit citation: a
+# third-party aggregator quotes Google's current Gemini Developer API
+# pricing as listing "Free Tier Standard usage for Gemini 3.6 Flash"
+# (5+ independent sources, all within 1-2 weeks of this change).
+# gemini-3.5-flash-lite's free status is inferred by continuity (Flash-Lite
+# has consistently been Google's free/cheap tier) rather than an equally
+# explicit per-model citation -- slightly lower confidence on that one.
 #
 # Structural gap worth naming regardless of which exact IDs are current:
 # unlike nous.py/sensenova.py, there's no live pricing signal to
@@ -50,7 +57,7 @@ SOURCE_NAME = "google-ai-studio"
 # caught by periodic manual research like this, not by any live API
 # check even with a real key.
 KNOWN_FREE = [
-    "gemini-3.5-flash",
+    "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
     "gemma-3-27b-it",
 ]

@@ -77,7 +77,7 @@ class TestGroq:
 class TestGoogleAiStudio:
     SAMPLE = {
         "models": [
-            {"name": "models/gemini-3.5-flash", "displayName": "Gemini 3.5 Flash", "inputTokenLimit": 1048576},
+            {"name": "models/gemini-3.6-flash", "displayName": "Gemini 3.6 Flash", "inputTokenLimit": 1048576},
             {"name": "models/gemini-3.5-flash-lite", "displayName": "Gemini 3.5 Flash-Lite", "inputTokenLimit": 1048576},
             {"name": "models/gemma-3-27b-it", "displayName": "Gemma 3 27B", "inputTokenLimit": 131072},
             # present upstream, must be excluded (removed: left free tier 2026-04-01)

@@ -13,7 +13,7 @@ google-ai-studio:
   refresh_method: manual
   api_key: ''
   models:
-  - id: gemini-3.5-flash
+  - id: gemini-3.6-flash
   - id: gemini-3.5-flash-lite
   prefix: gai
 groq:
