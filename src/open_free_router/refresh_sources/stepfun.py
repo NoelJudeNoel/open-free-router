@@ -5,7 +5,7 @@ StepFun's /v1/models has no pricing field (confirmed against a real,
 since-rotated API key's live response on 2026-07-31 — the response is
 just {id, object, created, owned_by}), so unlike nous.py/sensenova.py we
 can't auto-detect "free" from the API and need a hand-maintained
-allowlist, same pattern as groq.py/deepseek.py.
+allowlist, same pattern as groq.py.
 
 That same live check also caught that this repo's previously hardcoded
 model, "step-3.7-flash", does not exist upstream — the actual model is

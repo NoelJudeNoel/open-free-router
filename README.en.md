@@ -7,7 +7,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-route
 open-free-router serve
 ```
 
-Tracks free models across 10 LLM providers (OpenRouter, NVIDIA NIM, OpenCode Zen, Nous Research, StepFun, SenseNova, Groq, Google AI Studio, DeepSeek, Poolside AI), runs a local proxy routing by model ID to the correct upstream, and auto-refreshes the model list. Configure once, share across all agents (Hermes, OpenCode, PI, OMP).
+Tracks free models across 9 LLM providers (OpenRouter, NVIDIA NIM, OpenCode Zen, Nous Research, StepFun, SenseNova, Groq, Google AI Studio, Poolside AI), runs a local proxy routing by model ID to the correct upstream, and auto-refreshes the model list. Configure once, share across all agents (Hermes, OpenCode, PI, OMP).
 
 ## Install
 
@@ -126,7 +126,7 @@ First `serve` auto-creates config + registry from defaults — no manual setup n
 - **True streaming passthrough** — `stream: true` requests relay upstream SSE line by line, not buffered and returned all at once
 - **User-Agent** — upstream requests set `open-free-router/0.1` to avoid Cloudflare 1010 blocks
 - **Zero web framework** — uses stdlib `http.server`, no Flask/FastAPI
-- **Pluggable refresh sources** — one module per provider in `refresh_sources/`, exports `fetch(base_url, api_key) → list[ModelInfo]`. OpenRouter/NVIDIA NIM/Nous/SenseNova/Poolside auto-detect free models from pricing fields; Groq/DeepSeek/StepFun/OpenCode Zen have no pricing field and use a hand-maintained allowlist
+- **Pluggable refresh sources** — one module per provider in `refresh_sources/`, exports `fetch(base_url, api_key) → list[ModelInfo]`. OpenRouter/Nous/SenseNova auto-detect free models from pricing fields (a structural signal, the most reliable kind); OpenCode Zen detects via a `-free` ID suffix plus a few hardcoded exceptions; NVIDIA NIM/Groq/Google AI Studio/StepFun/Poolside have no pricing field in their upstream API and use a hand-maintained allowlist instead — for these, "auto-refresh" more accurately means "auto-verify the allowlisted IDs still exist," not "auto-discover new free models." The allowlists themselves need periodic manual verification against real API responses by someone holding a key
 - **Sync preserves hand-edited config** — agent config files (e.g. OMP's `models.yml`) are edited with `ruamel.yaml` (structured, comment-preserving) rather than text substitution, so only entries pointing at the local proxy are added/removed; any other providers, comments, or formatting the user configured by hand are left untouched
 - **Scheduler resilience** — an exception anywhere in a refresh cycle doesn't kill the background thread; it's logged with a full traceback and retried next interval. `/api/status` exposes whether the last cycle failed, so "auto-refresh silently died" is something you can actually notice.
 - **Writes gated on real change** — registry backups and every agent's synced config file are only rewritten when `refresh()` finds an actual model-list change, not on every cycle regardless.
