@@ -13,27 +13,38 @@ SOURCE_NAME = "groq"
 
 # Known free Groq models. Groq free tier changes occasionally; keep list conservative.
 #
-# Re-audited 2026-08-02 via web research (Groq's own docs code samples +
-# multiple independent third-party trackers from Apr-Jun 2026), not a
-# live authenticated /v1/models call -- this sandbox can't reach Groq's
-# API. Confidence varies per entry, noted inline. Run
+# CORRECTION 2026-08-02 (same day, deeper follow-up pass): the previous
+# version of this comment marked llama-3.3-70b-versatile and
+# llama-3.1-8b-instant as "confirmed current" based on Groq's docs code
+# samples -- those samples turned out to be stale relative to Groq's own
+# dedicated deprecations page (console.groq.com/docs/deprecations),
+# which is a stronger signal (it's the actual lifecycle tracker, not
+# just an example that hadn't been updated yet). That page states both
+# models were deprecated via email notice on 2026-06-17, with a shutdown
+# date of 2026-08-16 -- two weeks out from when this was written.
+# Lesson: for a fast-moving provider, "appears in a docs code sample" is
+# weaker evidence than "appears on the dedicated deprecations page,"
+# and the latter should be checked even when the former looks fine.
+#
+# Removed (this pass): llama-3.3-70b-versatile, llama-3.1-8b-instant
+# Removed (previous pass, still valid): gemma2-9b-it, mixtral-8x7b-32768
+#
+# Not a live authenticated /v1/models call -- this sandbox can't reach
+# Groq's API. Run
 # `curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $KEY"`
 # against a real key to confirm before fully trusting this list.
-#
-# Removed since the previous version of this list (multiple independent
-# 2026 sources list Groq's current free lineup with zero mentions of
-# either, and Mixtral in particular is a well-documented Groq
-# deprecation):
-#   - gemma2-9b-it
-#   - mixtral-8x7b-32768
 KNOWN_FREE = [
-    "llama-3.3-70b-versatile",  # confirmed current: appears in Groq's own official docs code samples
-    "llama-3.1-8b-instant",     # confirmed current: appears in Groq's own official docs code samples
-    "llama-guard-3-8b",         # LOWER CONFIDENCE: absent from "top model" trackers, but those
-                                 # typically exclude moderation models anyway, so absence isn't as
-                                 # strong a signal here as it was for gemma2/mixtral above
-    "openai/gpt-oss-20b",       # confirmed current: exact ID copied verbatim from Groq's own
-                                 # official docs code sample (console.groq.com/docs/overview)
+    "openai/gpt-oss-20b",       # confirmed current + free: Groq's own recommended replacement
+                                 # for llama-3.1-8b-instant; exact ID from console.groq.com/docs/overview
+    "openai/gpt-oss-120b",      # confirmed current + free: Groq's own recommended replacement
+                                 # for llama-3.3-70b-versatile; exact ID + reasoning capability
+                                 # confirmed via console.groq.com/docs/model/openai/gpt-oss-120b
+    "llama-guard-3-8b",         # LOWER CONFIDENCE, unchanged from previous pass: not found on
+                                 # Groq's deprecations page (good sign) but also not seen in any
+                                 # "current free lineup" listing checked so far -- some community
+                                 # trackers reference "Llama Guard 4 12B" as current, but no
+                                 # first-party exact ID was found for it, so not swapped in on a
+                                 # guess.
 ]
 
 

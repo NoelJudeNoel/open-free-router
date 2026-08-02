@@ -18,25 +18,40 @@ SOURCE_NAME = "google-ai-studio"
 #
 # gemini-2.5-pro REMOVED 2026-08-02: multiple independent sources from
 # Apr-Jul 2026 confirm Google moved Pro-series models (2.5 Pro, 3.x Pro)
-# to paid-only on the Gemini Developer API as of 2026-04-01. This is a
-# structural gap in this file's design worth naming explicitly: unlike
-# nous.py/sensenova.py, there's no live pricing signal to auto-detect
-# this kind of change from, and unlike nvidia_nim.py, there's no
-# provider-published catalog page with a "Free" filter either -- the
-# free/paid split here lives only in prose documentation, so it can
-# only be caught by periodic manual research like this, not by any
-# live API check even with a real key.
+# to paid-only on the Gemini Developer API as of 2026-04-01.
 #
-# gemini-2.5-flash / gemini-2.5-flash-lite NOT re-verified as part of
-# this same pass: recent (as of 2026-07-16) sources reference "Gemini
-# 3.5 Flash Standard" / "Gemini 3.1 Flash-Lite Standard" as the current
-# free lineup, suggesting the 2.5 generation may already be superseded
-# -- but no source found gave an exact, confirmed API model-ID string
-# for the 3.x generation, so these two entries are left as-is rather
-# than guessed-replaced with an unconfirmed ID.
+# gemini-2.5-flash / gemini-2.5-flash-lite REMOVED 2026-08-02 (same day,
+# deeper follow-up pass): Google's own official deprecations page
+# (ai.google.dev/gemini-api/docs/deprecations) lists an October 16, 2026
+# shutdown date for both -- but real-world reports on Google's own
+# developer forum describe both returning 404 "no longer available"
+# starting July 9, 2026, weeks *before* that stated date, with no
+# changelog announcement. "Shutdown dates are the earliest possible
+# dates" per Google's own caveat -- evidently that cuts both ways, and a
+# provider's stated future deprecation date is not a floor you can rely
+# on for "still definitely works today."
+#
+# Replaced with gemini-3.5-flash / gemini-3.5-flash-lite: exact IDs
+# confirmed via Google's own official docs (ai.google.dev), which
+# explicitly instruct migrating 2.5-flash-lite callers to
+# "gemini-3.5-flash-lite". gemini-3.5-flash's free-tier availability
+# has an explicit citation (a third-party model catalog citing "Free
+# listing since May 19, 2026"); gemini-3.5-flash-lite's free status is
+# inferred by continuity (Flash-Lite has consistently been Google's
+# free/cheap tier) rather than an equally explicit citation -- slightly
+# lower confidence on that one specifically.
+#
+# Structural gap worth naming regardless of which exact IDs are current:
+# unlike nous.py/sensenova.py, there's no live pricing signal to
+# auto-detect a change like this from, and unlike nvidia_nim.py, there's
+# no provider-published catalog page with a "Free" filter either -- the
+# free/paid split (and whether a model is even still callable) lives
+# only in prose documentation and forum reports, so it can only be
+# caught by periodic manual research like this, not by any live API
+# check even with a real key.
 KNOWN_FREE = [
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
     "gemma-3-27b-it",
 ]
 

@@ -13,8 +13,8 @@ google-ai-studio:
   refresh_method: manual
   api_key: ''
   models:
-  - id: gemini-2.5-flash
-  - id: gemini-2.5-flash-lite
+  - id: gemini-3.5-flash
+  - id: gemini-3.5-flash-lite
   prefix: gai
 groq:
   upstream_url: https://api.groq.com/openai/v1
@@ -22,12 +22,11 @@ groq:
   refresh_method: manual
   api_key: ''
   models:
-  - id: llama-3.3-70b
-    upstream_id: llama-3.3-70b-versatile
-  - id: llama-3.1-8b
-    upstream_id: llama-3.1-8b-instant
   - id: gpt-oss-20b
     upstream_id: openai/gpt-oss-20b
+    reasoning: true
+  - id: gpt-oss-120b
+    upstream_id: openai/gpt-oss-120b
     reasoning: true
   prefix: gq
 nvidia-nim:
