@@ -17,6 +17,11 @@ from open_free_router.proxy import run_proxy, rebuild_proxy_index
 from open_free_router.ui import run_ui
 from open_free_router.refresh import refresh
 from open_free_router.sync import write_pi_models, sync_all
+from open_free_router._instance_guard import (
+    acquire_instance_lock,
+    release_instance_lock,
+    InstanceAlreadyRunningError,
+)
 
 
 class Daemon:
@@ -26,6 +31,8 @@ class Daemon:
         self.cfg = cfg
         self.reg = Registry.load(cfg.registry_path)
         self._proxy_server = None
+        self._lock_file = None
+        self._pidfile = None
         self._stop = threading.Event()
         # Shared mutable dict (not two separate scalar attrs) so the UI
         # thread, which gets a reference to this same object, always sees
@@ -79,37 +86,54 @@ class Daemon:
         print(f"  Timeout: {self.cfg.upstream_timeout}s")
         print()
 
-        # Start proxy
-        srv, _ = run_proxy(self.reg, host=self.cfg.proxy_host, port=self.cfg.proxy_port,
-                           upstream_timeout=self.cfg.upstream_timeout)
-        self._proxy_server = srv
+        # Single-instance guard: refuse to start if another instance is
+        # already holding the pidfile lock or listening on either port.
+        # Prevents the "two serves race for the same port -> Errno 98 ->
+        # systemd auto-restart loop" failure mode. The lock is released
+        # in the finally below on any exit path.
+        lock_file, pidfile = acquire_instance_lock(
+            self.cfg.data_dir,
+            self.cfg.proxy_host, self.cfg.proxy_port,
+            self.cfg.ui_host, self.cfg.ui_port,
+        )
+        self._lock_file = lock_file
+        self._pidfile = pidfile
 
-        # Write Pi models on startup
-        proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
-        write_pi_models(self.reg, proxy_url=proxy_url)
-        sync_all(self.reg, proxy_url=proxy_url)
-
-        threads = [
-            threading.Thread(target=run_ui, args=(self.cfg, self.cfg.ui_port, self.reg),
-                              kwargs={"scheduler_status": self.scheduler_status}, daemon=True),
-            threading.Thread(target=self._scheduler, daemon=True),
-        ]
-
-        for t in threads:
-            t.start()
-
+        threads = []
         try:
+            # Start proxy
+            srv, _ = run_proxy(self.reg, host=self.cfg.proxy_host, port=self.cfg.proxy_port,
+                               upstream_timeout=self.cfg.upstream_timeout)
+            self._proxy_server = srv
+
+            # Write Pi models on startup
+            proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
+            write_pi_models(self.reg, proxy_url=proxy_url)
+            sync_all(self.reg, proxy_url=proxy_url)
+
+            threads = [
+                threading.Thread(target=run_ui, args=(self.cfg, self.cfg.ui_port, self.reg),
+                                  kwargs={"scheduler_status": self.scheduler_status}, daemon=True),
+                threading.Thread(target=self._scheduler, daemon=True),
+            ]
+
+            for t in threads:
+                t.start()
+
             while not self._stop.is_set():
                 self._stop.wait(1)
         except KeyboardInterrupt:
             self._stop.set()
-
-        print("\nShutting down...")
-        if self._proxy_server:
-            self._proxy_server.shutdown()
-        for t in threads:
-            t.join(timeout=5)
-        print("Done.")
+        finally:
+            print("\nShutting down...")
+            if self._proxy_server:
+                self._proxy_server.shutdown()
+            for t in threads:
+                t.join(timeout=5)
+            # Release the single-instance lock last so the next start
+            # can bind the ports only after we've fully shut them down.
+            release_instance_lock(self._lock_file, self._pidfile)
+            print("Done.")
 
 
 def main():
