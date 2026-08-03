@@ -152,6 +152,16 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     "created": 0,
                     "owned_by": name,
                 })
+        # Expose tier entry points (virtual models) so agents can request a
+        # whole tier instead of a concrete model; the proxy then picks the
+        # best available instance and fails over across the tier pool.
+        for tid in ("tier/high", "tier/mid", "tier/low"):
+            items.append({
+                "id": tid,
+                "object": "model",
+                "created": 0,
+                "owned_by": "open-free-router",
+            })
         self._send_json(200, {"object": "list", "data": items})
 
     def _forward_request(self, endpoint_suffix: str, body: str):
@@ -168,12 +178,76 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         model_id = req.get("model", "")
         provider_name = self._find_provider(model_id)
         if not provider_name:
-            self._send_json(403, {
-                "error": {
-                    "message": f"Model '{model_id}' not in free whitelist.",
+            # ── Tier routing (tier/high, tier/mid, tier/low) ────────────
+            from open_free_router.tiers import is_tier_id
+            from open_free_router.upstream import (
+                forward_tier_buffered, forward_tier_streaming,
+                TierExhaustedError, _request_context_len,
+            )
+
+            def _tier_exhausted(tier, last_status=None):
+                self._send_json(429, {"error": {
+                    "message": (f"tier '{tier}' exhausted — all free upstream "
+                                f"instances failed (last HTTP {last_status})."),
                     "type": "proxy_error",
-                }
-            })
+                    "tier": tier,
+                }})
+                return True  # signal: request handled
+
+            if is_tier_id(model_id):
+                tier = model_id.split("/", 1)[1]
+                timeout = getattr(self, "_upstream_timeout", 120)
+                ctx_len = _request_context_len(req)
+                req["_endpoint_path"] = endpoint_suffix
+                is_stream = endpoint_suffix != "embeddings" and bool(req.get("stream"))
+
+                if is_stream:
+                    result = forward_tier_streaming(tier, self.registry, req, timeout,
+                                                    request_context=ctx_len)
+                    if result is None:
+                        _tier_exhausted(tier)
+                        return
+                    res, inst = result
+                    if res.status >= 400:
+                        # All instances failed inside the tier; surface the
+                        # last upstream error body to the client.
+                        self._send_json(res.status,
+                                        json.loads(res.body or b"{}") if res.body else {})
+                        return
+                    self.send_response(res.status)
+                    self.send_header("Content-Type",
+                                     res.headers.get("content-type", "text/event-stream"))
+                    self.send_header("Cache-Control", "no-cache" if is_stream else "no-store")
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+                    while True:
+                        line = res.conn.readline()
+                        if not line:
+                            break
+                        self.wfile.write(f"{len(line):x}\r\n".encode("ascii"))
+                        self.wfile.write(line)
+                        self.wfile.write(b"\r\n")
+                    self.wfile.write(b"0\r\n\r\n")
+                    res.conn.close()
+                    return
+                # buffered tier path
+                try:
+                    status, body, hdrs = forward_tier_buffered(
+                        tier, self.registry, req, timeout, request_context=ctx_len)
+                    self.send_response(status)
+                    self.send_header("Content-Type",
+                                     hdrs.get("content-type", "application/json"))
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                except TierExhaustedError as e:
+                    _tier_exhausted(tier, e.last_status)
+                    return
+            self._send_json(403, {"error": {
+                "message": f"Model '{model_id}' not in free whitelist.",
+                "type": "proxy_error",
+            }})
             return
 
         p = self.registry.get(provider_name) if self.registry else None
