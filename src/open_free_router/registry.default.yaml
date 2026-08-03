@@ -37,6 +37,8 @@ nvidia-nim:
     upstream_id: z-ai/glm-5.2
   - id: deepseek-v4-flash
     upstream_id: deepseek-ai/deepseek-v4-flash
+  - id: mistral-medium-3.5-128b
+    upstream_id: mistralai/mistral-medium-3.5-128b
   prefix: nv
 nous:
   upstream_url: https://inference-api.nousresearch.com/v1
