@@ -37,6 +37,8 @@ nvidia-nim:
     upstream_id: z-ai/glm-5.2
   - id: deepseek-v4-flash
     upstream_id: deepseek-ai/deepseek-v4-flash
+  - id: kimi-k2.6
+    upstream_id: moonshotai/kimi-k2.6
   prefix: nv
 nous:
   upstream_url: https://inference-api.nousresearch.com/v1

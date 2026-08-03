@@ -23,6 +23,18 @@ SOURCE_NAME = "nvidia-nim"
 # previously in this list. Run `open-free-router refresh --source
 # nvidia-nim` against a real key to confirm before relying on the new
 # entries in production.
+#
+# moonshotai/kimi-k2.6 added same day, same confidence tier: confirmed
+# free via build.nvidia.com/moonshotai/kimi-k2.6 (own product page,
+# explicit "Start building with a free API endpoint" + a working code
+# sample using this exact model id). Kimi K3 was explicitly NOT added
+# despite being requested -- as of this same date it isn't on NVIDIA
+# NIM at all yet (confirmed via a live, unresolved NVIDIA Developer
+# Forums thread from days earlier asking NVIDIA to add it; also
+# consistent with K3's enormous deploy footprint -- 2.8T params,
+# 8x GB300-class hardware in official deploy guides -- for a model that
+# only finished releasing in the prior ~week). K2.6 is the newest Kimi
+# actually available on NIM right now.
 KNOWN_FREE = {
     "stepfun-ai/step-3.7-flash",
     "z-ai/glm-5.2",
@@ -30,6 +42,7 @@ KNOWN_FREE = {
     "nvidia/nemotron-3-ultra-550b-a55b",
     "mistralai/mistral-medium-3.5-128b",
     "deepseek-ai/deepseek-v4-flash",
+    "moonshotai/kimi-k2.6",
 }
 
 
