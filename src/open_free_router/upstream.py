@@ -130,15 +130,26 @@ def _request_context_len(req: dict[str, Any]) -> int:
 
 def _connect(inst: UpstreamInstance, path: str, data: bytes,
              headers: dict[str, str], timeout: int):
-    """Open a single upstream request. Returns (response, conn)."""
+    """Open a single upstream request. Returns (response, conn).
+
+    `path` is the endpoint suffix (e.g. "/chat/completions"); the upstream
+    URL's own path prefix (e.g. "/v1" for sensenova, "/v1beta" for google, or
+    "/openai/v1" for groq) is prepended so the final request hits the real
+    OpenAI-compatible route — mirroring how proxy.py builds
+    ``f"{upstream_url}/{endpoint_suffix}"``.
+    """
     url = urlsplit(inst.provider.upstream_url)
+    # base path from upstream URL, with no trailing slash
+    base = url.path.rstrip("/")
+    # `path` always starts with "/" here (see _endpoint_path)
+    full_path = base + path
     if url.scheme == "https":
         conn = http.client.HTTPSConnection(url.hostname, url.port or 443, timeout=timeout)
     else:
         conn = http.client.HTTPConnection(url.hostname, url.port or 80, timeout=timeout)
     conn.connect()
     conn.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    conn.request("POST", path, body=data, headers=headers)
+    conn.request("POST", full_path, body=data, headers=headers)
     return conn.getresponse(), conn
 
 

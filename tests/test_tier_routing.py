@@ -112,6 +112,56 @@ def test_mid_pool_fuzzy_upstream_id_match(registry):
     assert "nvidia-nim/minimaxai/minimax-m3" in keys
 
 
+def test_connect_prepends_upstream_path_prefix(registry):
+    """Regression: the tier path must keep the upstream URL's path prefix
+    (e.g. '/v1' in https://token.sensenova.cn/v1) when building the request
+    path — otherwise sensenova/nvidia/groq all return 404. Mirrors proxy.py's
+    ``f"{upstream_url}/{endpoint_suffix}"`` string concatenation."""
+    from open_free_router.upstream import _connect
+
+    captured = {}
+
+    class _NoNetHTTPS:
+        def __init__(self, host, port=443, timeout=120):
+            captured["host"] = host
+        def connect(self):
+            captured["connected"] = True
+        @property
+        def sock(self):
+            class _S:
+                def setsockopt(self, *a, **k):
+                    pass
+            return _S()
+        @sock.setter
+        def sock(self, v):
+            pass
+        def request(self, method, path, body=None, headers=None):
+            captured["method"] = method
+            captured["path"] = path
+        def getresponse(self):
+            raise AssertionError("should not be reached")
+        def close(self):
+            pass
+
+    # sensenova upstream_url is https://token.sensenova.cn/v1 -> base /v1
+    sensenova = registry.providers["sensenova"]
+    inst = UpstreamInstance.for_provider(sensenova, sensenova.models[2])  # glm-5.2
+    with patch("open_free_router.upstream.http.client.HTTPSConnection", _NoNetHTTPS):
+        with pytest.raises(AssertionError):
+            _connect(inst, "/chat/completions", b"{}", {}, 5)
+    assert captured["path"] == "/v1/chat/completions", captured
+    assert captured["host"] == "token.sensenova.cn"
+
+    # groq upstream is https://api.groq.com/openai/v1 -> base /openai/v1
+    groq = registry.providers["groq"]
+    ginst = UpstreamInstance.for_provider(groq, groq.models[0])
+    captured.clear()
+    with patch("open_free_router.upstream.http.client.HTTPSConnection", _NoNetHTTPS):
+        with pytest.raises(AssertionError):
+            _connect(ginst, "/chat/completions", b"{}", {}, 5)
+    assert captured["path"] == "/openai/v1/chat/completions", captured
+
+
 def test_pool_priority_orders_best_first(registry):
     """Within the glm-5.2 logical model, the 1M-context sensenova instance
     must be attempted before the 128k nvidia-nim one (context tiebreaker)."""
