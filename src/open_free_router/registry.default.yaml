@@ -54,14 +54,24 @@ poolside:
   auto_refresh: true
   refresh_method: poolside_api
   api_key: ''
+  # Local ids renamed 2026-08-02 from laguna-s:free/laguna-xs:free/
+  # laguna-m:free to the models' real names. The invented ":free" suffix
+  # didn't match anything a user would actually see -- Poolside's own
+  # docs (docs.poolside.ai/api/overview, poolside.ai/models) show curl/
+  # Python examples using "poolside/laguna-s-2.1" directly against their
+  # own API, so a user copying from Poolside's own documentation would
+  # never guess ":free". upstream_id (the "poolside/..." prefixed form)
+  # was separately confirmed correct via the same official docs -- that
+  # part was NOT broken, despite initially looking similar to the SenseNova/
+  # Nous issues; only the local display id needed fixing here.
   models:
-  - id: laguna-s:free
+  - id: laguna-s-2.1
     upstream_id: poolside/laguna-s-2.1
     reasoning: true
-  - id: laguna-xs:free
+  - id: laguna-xs-2.1
     upstream_id: poolside/laguna-xs-2.1
     reasoning: true
-  - id: laguna-m:free
+  - id: laguna-m.1
     upstream_id: poolside/laguna-m.1
     reasoning: true
   prefix: ps
