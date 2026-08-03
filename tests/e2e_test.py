@@ -102,7 +102,13 @@ except Exception as e:
 # ── Phase 3: Agent Routing Test ────────────────────────────
 print("\n[Phase 3] Agent Routing (model IDs → upstream via 8337)")
 
-for provider, model in [("openrouter","or/nemotron-3-nano:free"),("sensenova","nova/glm-5.2"),("stepfun","sf/step-3.7-flash"),("groq","gq/llama-3.1-8b"),("nous","ns/ling-3.0-flash:free")]:
+for provider, model in [("openrouter","or/nemotron-3-nano:free"),("sensenova","nova/glm-5.2"),("stepfun","sf/step-3.5-flash"),("groq","gq/gpt-oss-20b")]:
+    # nous intentionally omitted: its only two manual model entries were
+    # removed 2026-08-02 (one confirmed broken in real production use,
+    # the other unverified with the same risk profile) -- there's
+    # currently nothing valid to route to for this provider until a real
+    # verified entry is added back. See registry.default.yaml's nous:
+    # block for the full explanation.
     success, detail = proxy_call(model, timeout=15)
     p(f"{model} → {detail}") if success else w(f"{model} → {detail}")
 
