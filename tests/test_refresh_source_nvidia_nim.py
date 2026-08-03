@@ -28,9 +28,16 @@ SAMPLE = {
         {"id": "nvidia/nemotron-3-ultra-550b-a55b", "object": "model"},
         {"id": "mistralai/mistral-medium-3.5-128b", "object": "model"},
         {"id": "deepseek-ai/deepseek-v4-flash", "object": "model"},
+        {"id": "moonshotai/kimi-k2.6", "object": "model", "context_length": 262144},
         # present upstream but NOT in KNOWN_FREE -- must be excluded
         {"id": "nvidia/cosmos3-nano", "object": "model"},
         {"id": "deepseek-ai/deepseek-v4-pro", "object": "model"},
+        # Kimi K3 does not exist on NVIDIA NIM as of this writing --
+        # explicitly NOT added to KNOWN_FREE despite being requested;
+        # see nvidia_nim.py's own comment for why. Included here to
+        # guard against it ever silently sneaking into KNOWN_FREE on a
+        # guess rather than a real confirmed listing.
+        {"id": "moonshotai/kimi-k3", "object": "model"},
     ]
 }
 
@@ -58,6 +65,18 @@ class TestNvidiaNim:
         ids = {m.id for m in models}
         assert "mistralai/mistral-medium-3.5-128b" in ids
         assert "deepseek-ai/deepseek-v4-flash" in ids
+
+    @patch("requests.get")
+    def test_kimi_k2_6_included_k3_excluded(self, mock_get):
+        """K2.6 is the newest Kimi actually free on NVIDIA NIM. K3 was
+        requested but does not exist on NIM yet -- must not appear even
+        though a plausible-looking entry for it is present in the mocked
+        upstream response, guarding against ever adding it on a guess."""
+        mock_get.return_value = _mock_response(SAMPLE)
+        models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
+        ids = {m.id for m in models}
+        assert "moonshotai/kimi-k2.6" in ids
+        assert "moonshotai/kimi-k3" not in ids
 
     @patch("requests.get")
     def test_reasoning_flag_from_id_heuristic(self, mock_get):
