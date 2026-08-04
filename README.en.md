@@ -7,7 +7,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-route
 open-free-router serve
 ```
 
-Tracks free models across 9 LLM providers (OpenRouter, NVIDIA NIM, OpenCode Zen, Nous Research, StepFun, SenseNova, Groq, Google AI Studio, Poolside AI), runs a local proxy routing by model ID to the correct upstream, and auto-refreshes the model list. Configure once, share across all agents (Hermes, OpenCode, PI, OMP).
+Tracks free models across 9 LLM providers (OpenRouter, NVIDIA NIM, OpenCode Zen, Nous Research, StepFun, SenseNova, Groq, Google AI Studio, Poolside AI), runs a local proxy routing by model ID to the correct upstream, and auto-refreshes the model list, when the quota for a specific LLM API is exhausted, the system automatically rotates to a model of the same tier from a different upstream provider. Three tiers are defined; the high tier includes glm-5.2, deepseek-v4-flash, and gemini-3.6-flash.. Configure once, share across all agents (Hermes, OpenCode, PI, OMP).
 
 ## Install
 
