@@ -233,7 +233,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     return
                 # buffered tier path
                 try:
-                    status, body, hdrs = forward_tier_buffered(
+                    status, body, hdrs, inst = forward_tier_buffered(
                         tier, self.registry, req, timeout, request_context=ctx_len)
                     self.send_response(status)
                     self.send_header("Content-Type",

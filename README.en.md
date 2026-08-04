@@ -163,6 +163,37 @@ Behavior:
   from `refresh` -- a new free model or a retired one needs to be
   synced into `tiers.py` manually.
 
+### Observability
+
+Three layers, so "which instance actually handled a request" and "how
+has routing behaved" aren't a mystery:
+
+1. **Per-request**: a non-streaming `tier/*` response has its `model`
+   field rewritten from the requested alias (`tier/high`) to the
+   instance that actually served it (`sensenova/glm-5.2`) -- the same
+   thing OpenAI's own API does when an alias like `gpt-4` resolves to a
+   concrete snapshot, so any client already showing "current model:
+   `<field>`" reflects reality with no changes needed on the agent
+   side. Streaming responses intentionally do **not** get this rewrite
+   -- doing so would mean parsing and re-serializing every SSE chunk
+   instead of the current low-overhead line-relay approach, so a
+   streaming `tier/*` response shows whichever bare model name the
+   upstream itself reports (e.g. `glm-5.2`) -- correct, just without
+   the provider prefix.
+2. **Aggregate**: `GET /api/status` includes a `tiers` field with
+   per-instance success/failure counts and current cooldown status for
+   every configured tier, also shown on the dashboard's "Tier Routing"
+   card.
+3. **Event log**: cooldown and full-tier-exhaustion events print a
+   `[tier] ...` line to stdout (same style as the scheduler's
+   `[scheduler] ...` logging), so "what happened and why a switch
+   occurred" is visible in server logs without needing to correlate
+   timestamps against `/api/status` snapshots.
+
+All three are in-memory only (reset on restart, and cleared whenever
+the registry is rebuilt) -- this is "how has this process behaved
+recently," not a persisted metrics store.
+
 ## API Endpoints
 
 | Path | Method | Description |

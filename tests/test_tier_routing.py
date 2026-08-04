@@ -264,11 +264,18 @@ def test_forward_buffered_success_on_first():
     inst = UpstreamInstance.for_provider(p, m)
     with patch("open_free_router.tiers.tier_members", return_value=[inst]), \
          patch("open_free_router.upstream._connect") as mc:
-        mc.return_value = (_FakeResp(200, b'{"ok":true}'), MagicMock())
-        status, body, hdrs = forward_tier_buffered(
+        mc.return_value = (_FakeResp(200, b'{"ok":true, "model":"tier/high"}'), MagicMock())
+        status, body, hdrs, returned_inst = forward_tier_buffered(
             "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"}, 5)
         assert status == 200
-        assert json.loads(body) == {"ok": True}
+        parsed = json.loads(body)
+        assert parsed["ok"] is True
+        # Observability layer 1: the client-facing "model" field must be
+        # rewritten from the requested tier alias to the actual serving
+        # instance, so an agent showing "current model: <field>" reflects
+        # reality instead of the opaque "tier/high" alias.
+        assert parsed["model"] == inst.key
+        assert returned_inst is inst
 
 
 def test_forward_buffered_retries_then_fails_over():
@@ -288,10 +295,16 @@ def test_forward_buffered_retries_then_fails_over():
             (_FakeResp(429, retry_after="0"), MagicMock()),
             (_FakeResp(200, b'{"ok":"b"}'), MagicMock()),
         ]
-        status, body, hdrs = forward_tier_buffered(
+        status, body, hdrs, returned_inst = forward_tier_buffered(
             "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"}, 5)
         assert status == 200
-        assert json.loads(body) == {"ok": "b"}
+        parsed = json.loads(body)
+        assert parsed["ok"] == "b"
+        # The client-facing model field must reflect whichever instance
+        # actually served the request (inst_b, the failover target), not
+        # the one that failed (inst_a).
+        assert parsed["model"] == inst_b.key
+        assert returned_inst is inst_b
         assert _router.cooldowns.in_cooldown(inst_a.key)
 
 
@@ -537,3 +550,132 @@ def test_rebuild_proxy_index_resets_tier_cooldowns():
     assert _router.cooldowns.in_cooldown("sensenova/glm-5.2") is True
     rebuild_proxy_index()
     assert _router.cooldowns.in_cooldown("sensenova/glm-5.2") is False
+
+
+# ── Tier routing observability (three layers: per-request model field,
+# aggregate stats via tier_status(), event log lines) ──
+
+def test_buffered_success_records_stats():
+    reg, p, m = _single_inst_registry()
+    inst = UpstreamInstance.for_provider(p, m)
+    with patch("open_free_router.tiers.tier_members", return_value=[inst]), \
+         patch("open_free_router.upstream._connect") as mc:
+        mc.return_value = (_FakeResp(200, b'{"ok":true}'), MagicMock())
+        forward_tier_buffered(
+            "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"}, 5)
+    snap = _router.stats.snapshot()
+    assert snap[inst.key] == {"success": 1, "failure": 0}
+
+
+def test_buffered_failure_records_stats():
+    reg, p, m = _single_inst_registry()
+    inst = UpstreamInstance.for_provider(p, m)
+    with patch("open_free_router.tiers.tier_members", return_value=[inst]), \
+         patch("open_free_router.upstream._connect") as mc:
+        mc.return_value = (_FakeResp(500), MagicMock())
+        with pytest.raises(TierExhaustedError):
+            forward_tier_buffered(
+                "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"},
+                5, num_retries=0)
+    snap = _router.stats.snapshot()
+    assert snap[inst.key]["failure"] >= 1
+    assert snap[inst.key]["success"] == 0
+
+
+def test_streaming_success_records_stats():
+    provider = ProviderConfig(name="sensenova", upstream_url="https://token.sensenova.cn/v1",
+                               models=[ModelInfo(id="glm-5.2", upstream_id="glm-5.2")])
+    reg = Registry({})
+    reg.providers["sensenova"] = provider
+    inst_key = "sensenova/glm-5.2"
+
+    fake_resp = MagicMock()
+    fake_resp.status = 200
+    fake_resp.getheaders.return_value = [("Content-Type", "text/event-stream")]
+    fake_conn = MagicMock()
+
+    with patch("open_free_router.upstream._connect", return_value=(fake_resp, fake_conn)):
+        forward_tier_streaming("high", reg, {"model": "tier/high", "messages": []}, timeout=5)
+
+    snap = _router.stats.snapshot()
+    assert snap[inst_key] == {"success": 1, "failure": 0}
+
+
+def test_tier_status_reflects_stats_and_cooldown(registry):
+    from open_free_router.upstream import tier_status
+
+    inst_key = "sensenova/glm-5.2"
+    _router.stats.record_success(inst_key)
+    _router.stats.record_success(inst_key)
+    _router.stats.record_failure(inst_key)
+    _router.cooldowns.mark(inst_key, "30")
+
+    snapshot = tier_status(registry)
+    assert "high" in snapshot
+    entry = next(e for e in snapshot["high"] if e["instance"] == inst_key)
+    assert entry["success"] == 2
+    assert entry["failure"] == 1
+    assert entry["in_cooldown"] is True
+    assert entry["cooldown_seconds_remaining"] is not None
+    assert 0 < entry["cooldown_seconds_remaining"] <= 30
+
+    # An instance with no recorded activity yet must still appear, with
+    # zeroed counters -- tier_status() should describe the whole pool,
+    # not just instances that happen to have been used already.
+    other = next(e for e in snapshot["high"] if e["instance"] != inst_key)
+    assert other["success"] == 0
+    assert other["failure"] == 0
+    assert other["in_cooldown"] is False
+    assert other["cooldown_seconds_remaining"] is None
+
+
+def test_reset_tier_state_clears_stats_too():
+    """reset_tier_state() must clear stats, not just cooldowns -- counts
+    recorded against a provider/model identity that a registry rebuild
+    has since changed or removed aren't meaningful to keep around."""
+    _router.stats.record_success("sensenova/glm-5.2")
+    reset_tier_state()
+    assert _router.stats.snapshot() == {}
+
+
+def test_cooldown_event_is_logged(capsys):
+    """Layer 3: a human-readable [tier] log line when an instance is
+    cooled down, so 'what happened and why' is visible without needing
+    to correlate timestamps against /api/status snapshots."""
+    reg, p, m = _single_inst_registry()
+    inst = UpstreamInstance.for_provider(p, m)
+    with patch("open_free_router.tiers.tier_members", return_value=[inst]), \
+         patch("open_free_router.upstream._connect") as mc:
+        mc.return_value = (_FakeResp(500), MagicMock())
+        with pytest.raises(TierExhaustedError):
+            forward_tier_buffered(
+                "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"},
+                5, num_retries=0)
+    out = capsys.readouterr().out
+    assert "[tier]" in out
+    assert inst.key in out
+    assert "cooling down" in out
+
+
+def test_exhaustion_event_is_logged(capsys):
+    reg, p, m = _single_inst_registry()
+    inst = UpstreamInstance.for_provider(p, m)
+    with patch("open_free_router.tiers.tier_members", return_value=[inst]), \
+         patch("open_free_router.upstream._connect") as mc:
+        mc.return_value = (_FakeResp(500), MagicMock())
+        with pytest.raises(TierExhaustedError):
+            forward_tier_buffered(
+                "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"},
+                5, num_retries=0)
+    out = capsys.readouterr().out
+    assert "exhausted" in out
+    assert "'high'" in out
+
+
+def test_rewrite_model_field_falls_back_on_unparseable_body():
+    """_rewrite_model_field() must never raise or corrupt an unexpected
+    response body -- a non-JSON 2xx from a misbehaving upstream must
+    still be forwarded to the client unchanged, not dropped."""
+    from open_free_router.upstream import _rewrite_model_field
+    garbage = b"not json at all"
+    assert _rewrite_model_field(garbage, "sensenova/glm-5.2") == garbage

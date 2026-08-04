@@ -66,6 +66,26 @@ async function loadStatus() {
   } else {
     warn.style.display = 'none';
   }
+
+  const tiers = data.tiers || {};
+  const tierNames = Object.keys(tiers);
+  $('tiers').innerHTML = tierNames.length ? tierNames.map(name => `
+    <div class="tier-block">
+      <h3>tier/${name}</h3>
+      ${(tiers[name] || []).map(inst => `
+        <div class="provider-row">
+          <div class="dot ${inst.in_cooldown ? 'manual' : 'ok'}"></div>
+          <div class="pname">${inst.instance}
+            <span class="badge">${(inst.context_window / 1000).toFixed(0)}k ctx</span>
+          </div>
+          <div class="pmeta">
+            ${inst.success} ok / ${inst.failure} failed
+            ${inst.in_cooldown ? ` · cooling down ${inst.cooldown_seconds_remaining}s` : ''}
+          </div>
+        </div>
+      `).join('') || '<div class="status-line">No instances in this tier</div>'}
+    </div>
+  `).join('') : '<div class="status-line">No tier data</div>';
 }
 
 // Actions

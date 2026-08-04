@@ -59,6 +59,17 @@ class _Cooldown:
             return False
         return True
 
+    def status(self, key: str) -> float | None:
+        """Non-mutating peek at the cooldown-until monotonic timestamp,
+        or None if not currently cooling down. Unlike in_cooldown(),
+        never pops an expired entry -- for status/snapshot reporting,
+        not the hot routing path, where popping expired entries keeps
+        the table from growing unbounded."""
+        until = self._until.get(key)
+        if until is None or time.monotonic() >= until:
+            return None
+        return until
+
     def mark(self, key: str, retry_after: str | None = None) -> None:
         duration = self._parse_retry_after(retry_after) or DEFAULT_COOLDOWN
         with self._lock:
@@ -74,18 +85,86 @@ class _Cooldown:
             return None
 
 
+class _TierStats:
+    """Thread-safe per-instance success/failure counters.
+
+    In-memory only (not persisted across restarts) -- this is meant for
+    "how has this process's routing behaved recently" observability via
+    /api/status, not a long-term metrics store. Reset alongside
+    cooldowns in reset_tier_state(), since counts recorded against a
+    provider/model identity that a registry rebuild has since changed
+    or removed aren't meaningful to keep around.
+    """
+
+    def __init__(self) -> None:
+        self._success: dict[str, int] = {}
+        self._failure: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def record_success(self, key: str) -> None:
+        with self._lock:
+            self._success[key] = self._success.get(key, 0) + 1
+
+    def record_failure(self, key: str) -> None:
+        with self._lock:
+            self._failure[key] = self._failure.get(key, 0) + 1
+
+    def snapshot(self) -> dict[str, dict[str, int]]:
+        with self._lock:
+            keys = set(self._success) | set(self._failure)
+            return {
+                k: {"success": self._success.get(k, 0), "failure": self._failure.get(k, 0)}
+                for k in keys
+            }
+
+
 class _TierRouter:
     def __init__(self) -> None:
         self.num_retries = DEFAULT_NUM_RETRIES
         self.cooldowns = _Cooldown()
+        self.stats = _TierStats()
 
 
 _router = _TierRouter()
 
 
 def reset_tier_state() -> None:
-    """Clear all cooldowns — call after the registry is rebuilt."""
+    """Clear all cooldowns and stats — call after the registry is rebuilt."""
     _router.cooldowns = _Cooldown()
+    _router.stats = _TierStats()
+
+
+def tier_status(registry) -> dict[str, list[dict[str, Any]]]:
+    """Snapshot of every tier's pool, annotated with live routing state:
+    success/failure counts and current cooldown status per instance.
+
+    Layer 2 of tier-routing observability (see also: the rewritten
+    `model` field on non-streaming responses, and the [tier] event log
+    lines emitted on cooldown/exhaustion) -- exposed via GET
+    /api/status so the dashboard (and anyone curious) can see "how has
+    routing actually behaved", not just "what's configured."
+    """
+    from open_free_router.tiers import TIERS, tier_members
+    stats = _router.stats.snapshot()
+    now = time.monotonic()
+    result: dict[str, list[dict[str, Any]]] = {}
+    for tier_name in TIERS:
+        entries = []
+        for inst in tier_members(tier_name, registry):
+            s = stats.get(inst.key, {"success": 0, "failure": 0})
+            cooldown_until = _router.cooldowns.status(inst.key)
+            entries.append({
+                "instance": inst.key,
+                "context_window": inst.context_window,
+                "success": s["success"],
+                "failure": s["failure"],
+                "in_cooldown": cooldown_until is not None,
+                "cooldown_seconds_remaining": (
+                    max(0, round(cooldown_until - now)) if cooldown_until is not None else None
+                ),
+            })
+        result[tier_name] = entries
+    return result
 
 
 def _is_retryable_status(status: int) -> bool:
@@ -210,12 +289,21 @@ class TierStreamResult:
 def forward_tier_buffered(tier: str, registry, req: dict[str, Any],
                           timeout: int, *, num_retries: int = DEFAULT_NUM_RETRIES,
                           request_context: int = 0
-                          ) -> tuple[int, bytes, dict[str, str]]:
+                          ) -> tuple[int, bytes, dict[str, str], UpstreamInstance | None]:
     """Route a non-streaming request through `tier` with ordered fallback.
 
     context pre-filter -> per-instance retry (num_retries) -> cooldown-skip
     -> failover -> TierExhaustedError on full failure. Caller maps the
     error to a 429 response.
+
+    Returns (status, body, headers, inst) -- inst is the UpstreamInstance
+    that actually served the request, so callers can tell the agent which
+    real provider/model handled a tier/* request (observability layer 1).
+    On success, `body`'s "model" field is also rewritten from the tier
+    alias (e.g. "tier/high") to inst.key (e.g. "sensenova/glm-5.2") --
+    OpenAI's own API does the same thing for alias models resolving to a
+    concrete snapshot, so this matches what clients already expect rather
+    than inventing new behavior they'd need to know to look for.
     """
     from open_free_router.tiers import tier_members
     pool = tier_members(tier, registry, request_context=request_context)
@@ -244,19 +332,45 @@ def forward_tier_buffered(tier: str, registry, req: dict[str, Any],
                 retry_after = resp.getheader("Retry-After")
                 hdrs = {k.lower(): v for k, v in resp.getheaders()}
                 if status < 400:
-                    return status, body, hdrs
+                    _router.stats.record_success(inst.key)
+                    body = _rewrite_model_field(body, inst.key)
+                    return status, body, hdrs, inst
                 last_status = status
+                _router.stats.record_failure(inst.key)
                 if retry_after and _is_retryable_status(status):
                     _router.cooldowns.mark(inst.key, retry_after)
+                    print(f"[tier] {inst.key} -> HTTP {status}, cooling down "
+                          f"(retry_after={retry_after}s); trying next instance in '{tier}'")
                     break
                 if _is_retryable_status(status) and attempt < num_retries:
                     attempt += 1
                     continue
                 _router.cooldowns.mark(inst.key, retry_after)
+                print(f"[tier] {inst.key} -> HTTP {status}, cooling down "
+                      f"(default {DEFAULT_COOLDOWN}s); trying next instance in '{tier}'")
                 break
             finally:
                 conn.close()
+    print(f"[tier] '{tier}' exhausted -- every instance in the pool failed "
+          f"(last HTTP {last_status})")
     raise TierExhaustedError(tier, last_status)
+
+
+def _rewrite_model_field(body: bytes, instance_key: str) -> bytes:
+    """Best-effort: set body["model"] = instance_key. Never raises -- an
+    unparseable or unexpectedly-shaped body (e.g. an upstream returning
+    something non-JSON despite a 2xx, or a legitimately different
+    response shape this hasn't been tested against) must not break the
+    actual response being forwarded to the client. Falls back to the
+    original bytes unchanged on any failure."""
+    try:
+        parsed = json.loads(body)
+        if isinstance(parsed, dict):
+            parsed["model"] = instance_key
+            return json.dumps(parsed).encode()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        pass
+    return body
 
 
 def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
@@ -302,6 +416,7 @@ def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
                 body = resp.read()
                 retry_after = resp.getheader("Retry-After")
                 hdrs = {k.lower(): v for k, v in resp.getheaders()}
+                _router.stats.record_failure(inst.key)
                 if _is_retryable_status(resp.status) and attempt < num_retries:
                     attempt += 1
                     conn.close()
@@ -309,8 +424,24 @@ def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
                 # Retries exhausted for this instance: cooldown + try next
                 # instance in the pool (don't give up the whole tier yet).
                 _router.cooldowns.mark(inst.key, retry_after)
+                print(f"[tier] {inst.key} -> HTTP {resp.status}, cooling down; "
+                      f"trying next instance in '{tier}' (streaming)")
                 conn.close()
                 break  # -> next instance in `for inst in pool`
             client_hdrs = {k.lower(): v for k, v in resp.getheaders()}
+            _router.stats.record_success(inst.key)
+            # Model field intentionally NOT rewritten here, unlike the
+            # buffered path: doing so would mean parsing and re-serializing
+            # every SSE chunk instead of the current low-overhead
+            # readline()-and-relay approach (see proxy.py's streaming
+            # design notes from the non-tier path this mirrors). The
+            # model name upstream itself reports in each chunk (typically
+            # the bare model id, e.g. "glm-5.2") is passed through as-is
+            # -- not as precise as the buffered path's full
+            # "provider/model" rewrite, but zero-cost and still tells the
+            # agent which underlying model answered, just not which
+            # provider's copy of it.
             return TierStreamResult(resp.status, client_hdrs, None, resp, conn, False), inst
+    print(f"[tier] '{tier}' exhausted -- every instance in the pool failed "
+          f"(last HTTP {last_status}, streaming)")
     raise TierExhaustedError(tier, last_status)
