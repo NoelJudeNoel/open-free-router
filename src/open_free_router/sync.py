@@ -54,6 +54,12 @@ def write_pi_models(reg: Registry, do_write: bool = True, proxy_url: str = "http
                         "contextWindow": m.context_window,
                         "maxTokens": m.max_tokens,
                         "reasoning": m.reasoning,
+                        # Pi requires an explicit api for each model. Every
+                        # instance points at the local single-port proxy,
+                        # which is OpenAI-compatible, so they all use the
+                        # same value. mirrors the "api" field Pi itself
+                        # writes into models-store.json for these providers.
+                        "api": "openai-completions",
                     }
                     for m in p.models
                 ],

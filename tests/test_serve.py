@@ -39,6 +39,9 @@ def test_write_pi_models_creates_correct_format(tmp_path):
             assert "id" in m
             assert "contextWindow" in m
             assert "maxTokens" in m
+            # Pi requires an explicit api per model; all providers here
+            # point at the OpenAI-compatible local proxy.
+            assert m["api"] == "openai-completions"
 
     assert data["providers"]["local-free"]["models"][0]["id"] == "or/m1:free"
     assert data["providers"]["deepseek"]["models"][0]["id"] == "ds/deepseek-chat"
