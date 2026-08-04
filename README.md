@@ -110,6 +110,8 @@ registry_git_history: false
 | 模块 | 职责 |
 |---|---|
 | `proxy.py` | 单端口代理(8337)，按模型 ID 路由到对应 upstream。白名单过滤，不在列表的模型返回 403 |
+| `tiers.py` | 虚拟模型 `tier/high`\|`mid`\|`low` → 一组具体上游实例的映射与排序 |
+| `upstream.py` | tier 路由的实际转发：按池顺序重试、失败自动切换下一个实例、短时冷却 |
 | `serve.py` | 守护进程：拉起 proxy + UI + scheduler，启动时自动写入 Pi models.json |
 | `ui.py` | Web 仪表盘（9057）：状态查看、Provider 增删改、模型刷新、实时配置编辑 |
 | `refresh.py` | 轮询提供商 API 获取免费模型变化，支持 pluggable sources |
@@ -130,6 +132,22 @@ registry_git_history: false
 - **变化才写盘** —— 只有当 `refresh()` 检测到真实的模型列表变化时，才会重写 registry 备份和所有 Agent 的同步文件；一次没有变化的常规刷新不会产生任何多余的磁盘写入
 - **已知 Provider 的 upstream_url 被锚定** —— 内置支持的 Provider，其 `upstream_url` 固定读取自 `registry.default.yaml`，不接受 API/UI 提交的覆盖值，从根上避免"代理把真实 key 发到被篡改的地址"这类问题
 - **自动 Pi 同步** —— 检测到 `~/.pi/agent/` 目录存在时自动写入 models.json
+
+## 三档虚拟模型（自动故障转移）
+
+除了指定具体模型 ID，Agent 也可以直接用三个虚拟模型名，代理会在同一档位内的多个真实实例之间按顺序尝试、自动切换：
+
+| 虚拟模型 | 说明 |
+|---|---|
+| `tier/high` | 旗舰级/百万 token 上下文（glm-5.2、deepseek-v4-flash、gemini-3.6-flash 等） |
+| `tier/mid` | 中等强度，几十万 token 上下文或强编码/推理能力 |
+| `tier/low` | 兜底档：所有未被 high/mid 认领的模型 |
+
+行为：
+- 同一个逻辑模型（比如 `glm-5.2`）如果被多个供应商提供，会按"最优先、上下文窗口最大"排序，依次尝试；某个实例连续失败（429/5xx）会进入短时冷却，自动换下一个，而不是直接把错误抛给 Agent。
+- 请求体里的 `messages` 长度会做粗略估算，上下文窗口明显不够的实例会被提前过滤掉，不浪费一次请求。
+- 整档全部实例都失败时返回 429，带最后一次真实上游状态码。
+- 这套优选顺序（`tiers.py` 里的 `_INSTANCE_PRIORITY`）和逻辑模型清单目前是硬编码维护的，不会随 `refresh` 自动更新——供应商加了新模型或某个模型下线，需要手动同步进 `tiers.py`。
 
 ## API 端点
 
