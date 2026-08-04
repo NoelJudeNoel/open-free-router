@@ -47,6 +47,18 @@ def write_pi_models(reg: Registry, do_write: bool = True, proxy_url: str = "http
             pi_name = _PI_PROVIDER_NAMES.get(name, name)
             providers[pi_name] = {
                 "baseUrl": proxy_url,
+                # Pi only lists a provider's models as "available" when the
+                # provider is "configured" — i.e. checkAuth(provider) is
+                # non-undefined (provider-composer.js configuredApiKey():
+                # extension?.apiKey ?? config?.apiKey). auth.json holds only
+                # the real upstream keys; without a per-provider apiKey in
+                # models.json, Pi hides all our injected providers behind
+                # "Only showing models from configured providers."
+                # The local proxy does NOT validate incoming credentials
+                # (it authenticates to each upstream itself from the
+                # registry), so a single non-empty placeholder satisfies
+                # Pi's "is this provider configured" gate for every channel.
+                "apiKey": "open-free-router",
                 "models": [
                     {
                         "id": f"{p.model_prefix}/{m.id}",
