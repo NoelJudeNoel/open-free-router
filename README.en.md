@@ -182,7 +182,7 @@ pip install -e ".[dev]"
 python3 -m pytest tests/ -v
 ```
 
-22 tests covering: registry CRUD, config loading, Pi models.json writing, proxy index rebuild.
+164 tests covering: tier routing + failover, registry CRUD, config loading, Pi models.json writing, proxy index rebuild, UI auth gating, streaming relay, single-instance guard, allowlist-audit regressions, and more. CI (`.github/workflows/tests.yml`) runs the full suite on Python 3.11 / 3.12.
 
 ## License
 

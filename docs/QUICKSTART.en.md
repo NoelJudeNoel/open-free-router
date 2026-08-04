@@ -16,7 +16,7 @@ Hermes). Each needs its own "API URL + API key" to use a model — that's tediou
 **open-free-router does three things for you:**
 
 1. **Aggregates free models** — automatically tracks the **free** model lists
-   across 10 providers (OpenRouter, Google, Groq, NVIDIA, etc.), so you don't
+   across 9 providers (OpenRouter, Google, Groq, NVIDIA, etc.), so you don't
    have to watch for updates yourself.
 2. **One URL for everything** — runs a local proxy on your machine
    (`http://127.0.0.1:8337`). All your agents point at this one URL, and it
@@ -138,7 +138,7 @@ This is the most important command. It starts three things at once:
 On first run you'll see something like:
 
 ```
-✔ Created ~/.config/open-free-router/registry.yaml with 10 providers
+✔ Created ~/.config/open-free-router/registry.yaml with 9 providers
   ⚠ No API keys configured yet.
   Run:  open-free-router setup
 
@@ -171,7 +171,7 @@ the proxy is serving the model list. ✅
 Now `serve` is running, but there are no keys yet — the proxy can list models,
 but actual model calls will fail (no credentials to authenticate upstream).
 
-> You don't need keys for all 10 providers. **Fill in only the ones you want to
+> You don't need keys for all 9 providers. **Fill in only the ones you want to
 > use.** Providers without keys are skipped and don't affect the others.
 
 ### Option A: Interactive wizard (recommended)
@@ -195,7 +195,7 @@ where you have one; press Enter to skip the rest.** Example:
 It then reports how many providers now have keys:
 
 ```
-✔ Saved ~/.config/open-free-router/registry.yaml — 2/10 providers have keys
+✔ Saved ~/.config/open-free-router/registry.yaml — 2/9 providers have keys
   Run  open-free-router serve  to start.
 ```
 
@@ -298,6 +298,12 @@ The proxy accepts several spellings for the same model:
 | provider/upstream ID | `nvidia-nim/z-ai/glm-5.2` | some agents use this |
 
 Just copy an ID from `models` — that always works.
+
+> There are also 3 **virtual models**: `tier/high` (flagship / million-token
+> context), `tier/mid` (mid-tier), and `tier/low` (catch-all). When you use
+> one of these as `model`, the proxy tries the tier's real upstream
+> instances in priority order and fails over automatically. See
+> [README "Three-tier virtual models"](../README.en.md#three-tier-virtual-models-automatic-failover).
 
 
 ### 6.4 Sync to agents in one command (OpenCode / OMP / Pi / Hermes)

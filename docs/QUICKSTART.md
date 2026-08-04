@@ -15,7 +15,7 @@
 
 **open-free-router 帮你做三件事：**
 
-1. **汇聚免费模型** —— 自动跟踪 10 个提供商（OpenRouter、Google、Groq、
+1. **汇聚免费模型** —— 自动跟踪 9 个提供商（OpenRouter、Google、Groq、
    NVIDIA 等）的**免费**模型列表，不用你手动盯着它们更新。
 2. **一个地址通吃** —— 在你自己电脑上开一个本地代理（`http://127.0.0.1:8337`），
    你所有 Agent 都指向这一个地址，由它按"模型 ID"自动转发到正确的提供商
@@ -144,7 +144,7 @@ open-free-router serve
 你第一次运行会看到类似：
 
 ```
-✔ Created ~/.config/open-free-router/registry.yaml with 10 providers
+✔ Created ~/.config/open-free-router/registry.yaml with 9 providers
   ⚠ No API keys configured yet.
   Run:  open-free-router setup
 
@@ -178,7 +178,7 @@ curl http://127.0.0.1:8337/v1/models
 现在 `serve` 已经在跑，但还没有任何 key，所以代理虽能列出模型、
 **真正调用模型会失败**（因为没有去上游认证的凭据）。
 
-> 你不一定需要填全部 10 个 provider 的 key —— **只填你想用的那几个**就行。
+> 你不一定需要填全部 9 个 provider 的 key —— **只填你想用的那几个**就行。
 > 不填 key 的 provider 会被跳过，不影响其它 provider 使用。
 
 ### 方式一：交互式向导（推荐）
@@ -202,7 +202,7 @@ open-free-router setup
 填完它会提示保存成功，并统计有几个 provider 已有 key：
 
 ```
-✔ Saved ~/.config/open-free-router/registry.yaml — 2/10 providers have keys
+✔ Saved ~/.config/open-free-router/registry.yaml — 2/9 providers have keys
   Run  open-free-router serve  to start.
 ```
 
@@ -307,6 +307,11 @@ curl http://127.0.0.1:8337/v1/chat/completions \
 
 在 `models` 里直接复制一个 ID 用，准没错。
 
+> 另外还有 3 个**虚拟模型**：`tier/high`（旗舰/百万上下文）、`tier/mid`
+>（中档）、`tier/low`（兜底）。把 `model` 填成它们时，代理会在该档内的
+> 多个真实上游实例间按优先级依次尝试、自动故障转移。详见
+> [README「三档虚拟模型」](../README.md#三档虚拟模型自动故障转移)。
+
 ### 6.4 一键同步到各 Agent（OpenCode / OMP / Pi / Hermes）
 
 如果你装了这些 Agent 的桌面版 / 终端版，且想让它们自动拿到这份模型列表，
@@ -316,7 +321,7 @@ curl http://127.0.0.1:8337/v1/chat/completions \
 open-free-router sync
 ```
 
-它会把这 10 个 provider、35 个模型写进各个 Agent 的配置文件，并且**先清理
+它会把这 9 个 provider、33 个模型写进各个 Agent 的配置文件，并且**先清理
 掉旧的、指向本地代理的重复条目**再写，不会越写越多。输出形如：
 
 ```
