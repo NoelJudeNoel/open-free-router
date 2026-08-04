@@ -202,18 +202,16 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 is_stream = endpoint_suffix != "embeddings" and bool(req.get("stream"))
 
                 if is_stream:
-                    result = forward_tier_streaming(tier, self.registry, req, timeout,
-                                                    request_context=ctx_len)
-                    if result is None:
-                        _tier_exhausted(tier)
+                    try:
+                        res, inst = forward_tier_streaming(
+                            tier, self.registry, req, timeout, request_context=ctx_len)
+                    except TierExhaustedError as e:
+                        _tier_exhausted(tier, e.last_status)
                         return
-                    res, inst = result
-                    if res.status >= 400:
-                        # All instances failed inside the tier; surface the
-                        # last upstream error body to the client.
-                        self._send_json(res.status,
-                                        json.loads(res.body or b"{}") if res.body else {})
-                        return
+                    # forward_tier_streaming() only returns via its success
+                    # path (status < 400) or raises TierExhaustedError --
+                    # it can never return a >=400 status, so there is no
+                    # error-status branch to handle here.
                     self.send_response(res.status)
                     self.send_header("Content-Type",
                                      res.headers.get("content-type", "text/event-stream"))
@@ -221,14 +219,17 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     self.send_header("Transfer-Encoding", "chunked")
                     self.end_headers()
                     while True:
-                        line = res.conn.readline()
+                        line = res.response.readline()
                         if not line:
                             break
                         self.wfile.write(f"{len(line):x}\r\n".encode("ascii"))
                         self.wfile.write(line)
                         self.wfile.write(b"\r\n")
                     self.wfile.write(b"0\r\n\r\n")
-                    res.conn.close()
+                    # Close the actual connection, not just the response --
+                    # response.close() alone doesn't reliably release the
+                    # underlying socket. See TierStreamResult's docstring.
+                    res.raw_conn.close()
                     return
                 # buffered tier path
                 try:
@@ -406,5 +407,21 @@ def run_proxy(registry: Registry, host: str = "127.0.0.1", port: int = 8337, ups
 
 
 def rebuild_proxy_index():
-    """Rebuild the model-ID → provider reverse index."""
+    """Rebuild the model-ID → provider reverse index, and clear tier
+    routing's cooldown state.
+
+    reset_tier_state() existed (upstream.py) with a docstring saying to
+    call it here, but nothing actually did -- it was only ever invoked
+    from tests resetting state between test cases. Wiring it in here
+    means every real call site that already calls rebuild_proxy_index()
+    after a registry change (serve.py's scheduler, ui.py's provider
+    add/refresh handlers, cli.py) gets this for free, rather than
+    needing each one to separately remember to call it. Without this,
+    a cooldown keyed on a provider+upstream_id combination could
+    outlive the registry change that invalidated it -- low severity
+    (worst case is a stale skip, not incorrect routing), but there's no
+    reason to leave it unwired now that a fix is this cheap.
+    """
+    from open_free_router.upstream import reset_tier_state
     _ProxyHandler.rebuild_index()
+    reset_tier_state()

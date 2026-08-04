@@ -112,6 +112,8 @@ First `serve` auto-creates config + registry from defaults — no manual setup n
 | Module | Purpose |
 |---|---|
 | `proxy.py` | Single-port proxy(8337), model-ID routing to upstream. Whitelist-only; unknown models return 403 |
+| `tiers.py` | Maps virtual models `tier/high`\|`mid`\|`low` to an ordered pool of concrete upstream instances |
+| `upstream.py` | Actual tier-routing forwarding: retries through the pool in order, auto-switches on failure, short cooldowns |
 | `serve.py` | Daemon: proxy + UI + scheduler + auto-write Pi models.json |
 | `ui.py` | Web dashboard(9057): status, provider CRUD, model refresh, live config editor |
 | `refresh.py` | Poll provider APIs for free model changes. Pluggable sources |
@@ -132,6 +134,34 @@ First `serve` auto-creates config + registry from defaults — no manual setup n
 - **Writes gated on real change** — registry backups and every agent's synced config file are only rewritten when `refresh()` finds an actual model-list change, not on every cycle regardless.
 - **Built-in providers' upstream_url is pinned** — read from `registry.default.yaml`, not accepted from API/UI submissions, closing the path where a proxy could be redirected to send a real API key to an attacker's server.
 - **Auto Pi sync** — writes `~/.pi/agent/models.json` when Pi config dir exists
+
+## Three-tier virtual models (automatic failover)
+
+Besides picking a specific model ID, agents can also target one of
+three virtual model names; the proxy tries multiple real instances
+within that tier in order and switches automatically on failure.
+
+| Virtual model | Meaning |
+|---|---|
+| `tier/high` | Flagship-class / million-token context (glm-5.2, deepseek-v4-flash, gemini-3.6-flash, etc.) |
+| `tier/mid` | Solid mid-tier: hundreds-of-thousands-token context, or strong coding/reasoning |
+| `tier/low` | Catch-all: everything not claimed by high/mid |
+
+Behavior:
+- When the same logical model (e.g. `glm-5.2`) is offered by multiple
+  providers, instances are tried in order of preference and context
+  window size. An instance that fails repeatedly (429/5xx) enters a
+  short cooldown and the next one is tried automatically instead of the
+  error being surfaced straight to the agent.
+- The request's `messages` length is roughly estimated and instances
+  whose context window is clearly too small are filtered out before a
+  request is even attempted.
+- If every instance in a tier fails, the proxy returns 429 with the
+  last real upstream status code.
+- The preference ordering (`_INSTANCE_PRIORITY` in `tiers.py`) and the
+  logical-id lists per tier are currently hand-maintained, not derived
+  from `refresh` -- a new free model or a retired one needs to be
+  synced into `tiers.py` manually.
 
 ## API Endpoints
 

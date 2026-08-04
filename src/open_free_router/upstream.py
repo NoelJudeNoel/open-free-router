@@ -111,8 +111,21 @@ def _build_headers(inst: UpstreamInstance, original: dict[str, Any]) -> dict[str
 
 
 def _patch_model(req: dict[str, Any], inst: UpstreamInstance) -> dict[str, Any]:
-    """Swap model id to the upstream id and clamp max_tokens to capability."""
-    patched = dict(req)
+    """Swap model id to the upstream id and clamp max_tokens to capability.
+
+    Also strips internal routing keys (currently "_endpoint_path" and
+    "_headers", anything prefixed "_") that proxy.py stashes on `req`
+    to thread state through to this module. Bug fixed here: this used
+    to be a plain `dict(req)` shallow copy with no stripping, so those
+    internal keys rode along into `json.dumps(patched)` and got sent
+    as real fields in the chat-completion body forwarded to the actual
+    third-party upstream (e.g. SenseNova, Poolside) -- an unintended
+    leak of internal implementation details into every tier-routed
+    request. No test caught this because every test mocks _connect()
+    entirely and never inspects the serialized body that would have
+    actually been sent.
+    """
+    patched = {k: v for k, v in req.items() if not k.startswith("_")}
     patched["model"] = inst.upstream_model
     mm = patched.get("max_tokens")
     if mm is not None and inst.max_tokens and mm > inst.max_tokens:
@@ -163,15 +176,34 @@ def _endpoint_path(req: dict[str, Any]) -> str:
 
 
 class TierStreamResult:
-    """Outcome of a single upstream attempt in streaming mode."""
-    __slots__ = ("status", "headers", "body", "conn", "switch_allowed")
+    """Outcome of a single upstream attempt in streaming mode.
+
+    Holds both the HTTPResponse (for .readline()-based SSE relay, same
+    approach as the non-tier streaming path) and the underlying
+    HTTPConnection/HTTPSConnection separately, because closing the
+    former does not reliably release the latter's socket. The previous
+    version of this class only kept the response (confusingly in a
+    field literally named `conn`) and discarded the real connection
+    object returned by _connect() without ever closing it -- a slow
+    socket/file-descriptor leak under sustained tier-streaming traffic,
+    since Python's GC finalizing the object eventually isn't the same
+    as deterministic cleanup.
+    """
+    __slots__ = ("status", "headers", "body", "response", "raw_conn", "switch_allowed")
 
     def __init__(self, status: int, headers, body: bytes | None,
-                 conn, switch_allowed: bool):
+                 response, raw_conn, switch_allowed: bool):
         self.status = status
         self.headers = headers
         self.body = body
-        self.conn = conn
+        self.response = response
+        self.raw_conn = raw_conn
+        # Always False in the current implementation -- reserved for the
+        # "switch upstream mid-stream before the first byte reaches the
+        # client" behavior described in this module's top docstring, but
+        # that logic was never actually built, and nothing currently
+        # reads this field. Documenting this explicitly rather than
+        # leaving it looking like functioning-but-unverified behavior.
         self.switch_allowed = switch_allowed
 
 
@@ -232,18 +264,26 @@ def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
                            request_context: int = 0):
     """Try instances in `tier` until one begins streaming without error.
 
-    Returns (TierStreamResult, UpstreamInstance) | None:
-      - status >= 400 & switch_allowed=True : headers not flushed, retry tier
-      - status in (200,) : streaming started; drain result.conn.
-      - None : pool exhausted -> caller raises TierExhaustedError.
+    Returns (TierStreamResult, UpstreamInstance) on success -- streaming
+    started; drain result.response, then close result.raw_conn when done.
+
+    Raises TierExhaustedError(tier, last_status) when every instance in
+    the pool failed (or the pool was empty to begin with), mirroring
+    forward_tier_buffered()'s contract. Previously this returned a bare
+    None on exhaustion with no status info, so proxy.py's error message
+    for a streaming-exhausted tier always said "last HTTP None" even
+    when every instance had in fact failed with a real status code --
+    inconsistent with (and strictly less useful than) the buffered
+    path's error for the same failure mode.
     """
     from open_free_router.tiers import tier_members
     pool = tier_members(tier, registry, request_context=request_context)
     if not pool:
-        return None
+        raise TierExhaustedError(tier)
 
     path = _endpoint_path(req)
     original_headers: dict[str, Any] = req.get("_headers", {}) or {}
+    last_status: int | None = None
 
     for inst in pool:
         if _router.cooldowns.in_cooldown(inst.key):
@@ -258,6 +298,7 @@ def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
                 attempt += 1
                 continue
             if resp.status >= 400:
+                last_status = resp.status
                 body = resp.read()
                 retry_after = resp.getheader("Retry-After")
                 hdrs = {k.lower(): v for k, v in resp.getheaders()}
@@ -271,5 +312,5 @@ def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
                 conn.close()
                 break  # -> next instance in `for inst in pool`
             client_hdrs = {k.lower(): v for k, v in resp.getheaders()}
-            return TierStreamResult(resp.status, client_hdrs, None, resp, False), inst
-    return None
+            return TierStreamResult(resp.status, client_hdrs, None, resp, conn, False), inst
+    raise TierExhaustedError(tier, last_status)

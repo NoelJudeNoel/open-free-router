@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
-from open_free_router.config import Config
 from open_free_router.registry import Registry, ModelInfo, ProviderConfig
 from open_free_router.tiers import (
     TIERS, TIER_IDS, is_tier_id, tier_members, UpstreamInstance,
@@ -17,10 +18,28 @@ from open_free_router.upstream import (
     _Cooldown,
 )
 
+DEFAULT_YAML = Path(__file__).parent.parent / "src" / "open_free_router" / "registry.default.yaml"
+
 
 @pytest.fixture()
 def registry() -> Registry:
-    return Registry.load(Config().registry_path)
+    """Load the actual shipped registry.default.yaml, not
+    Config().registry_path (the *user's* real config file location).
+
+    The previous version of this fixture used Config().registry_path,
+    which only resolves to a populated registry on a machine that
+    already has open-free-router configured with real providers --
+    it's empty (or missing entirely) on any clean environment,
+    including this repo's own CI. That's exactly what happened: this
+    fixture made 7 of this file's tests fail in CI (confirmed against
+    the real GitHub Actions run for this fix) while appearing to pass
+    for whoever wrote them locally, because their own machine happened
+    to have a real config file with real providers configured. Loading
+    the shipped default template instead makes these tests reproducible
+    on any machine, dev or CI, with no user-specific state required.
+    """
+    data = yaml.safe_load(DEFAULT_YAML.read_text())
+    return Registry(data)
 
 
 @pytest.fixture(autouse=True)
@@ -88,7 +107,7 @@ def test_high_tier_logical_ids():
 def test_mid_tier_logical_ids():
     assert set(TIERS["mid"]) == {
         "minimax-m3", "step-3.7-flash", "laguna-s-2.1", "laguna-xs-2.1",
-        "mimo-v2.5-free", "ling-3.0-flash", "nemotron-3-ultra-550b-a55b",
+        "mimo-v2.5-free", "ling-3.0-flash-free", "nemotron-3-ultra-550b-a55b",
     }
 
 
@@ -101,7 +120,10 @@ def test_high_pool_contains_expected_instances(registry):
     pool = tier_members("high", registry)
     keys = {f"{p.provider.name}/{p.model.id}" for p in pool}
     assert "sensenova/glm-5.2" in keys
-    assert "nvidia-nim/z-ai/glm-5.2" in keys
+    # model.id is the local short id (see registry.default.yaml), not the
+    # fully-qualified upstream_id -- nvidia-nim's local id for this model
+    # is "glm-5.2", same as sensenova's, distinguished by provider name.
+    assert "nvidia-nim/glm-5.2" in keys
     assert "sensenova/deepseek-v4-flash" in keys
     assert "google-ai-studio/gemini-3.6-flash" in keys
 
@@ -109,7 +131,12 @@ def test_high_pool_contains_expected_instances(registry):
 def test_mid_pool_fuzzy_upstream_id_match(registry):
     pool = tier_members("mid", registry)
     keys = {f"{p.provider.name}/{p.model.id}" for p in pool}
-    assert "nvidia-nim/minimaxai/minimax-m3" in keys
+    # "minimax-m3" is nvidia-nim's local id for upstream_id
+    # "minimaxai/minimax-m3" -- this is the "fuzzy" match this test name
+    # refers to: the tier's logical id ("minimax-m3") matches via
+    # _normalize() stripping the "minimaxai/" prefix from the upstream_id,
+    # not via an exact upstream_id string match.
+    assert "nvidia-nim/minimax-m3" in keys
 
 
 def test_connect_prepends_upstream_path_prefix(registry):
@@ -145,7 +172,8 @@ def test_connect_prepends_upstream_path_prefix(registry):
 
     # sensenova upstream_url is https://token.sensenova.cn/v1 -> base /v1
     sensenova = registry.providers["sensenova"]
-    inst = UpstreamInstance.for_provider(sensenova, sensenova.models[2])  # glm-5.2
+    glm_model = next(m for m in sensenova.models if m.id == "glm-5.2")
+    inst = UpstreamInstance.for_provider(sensenova, glm_model)
     with patch("open_free_router.upstream.http.client.HTTPSConnection", _NoNetHTTPS):
         with pytest.raises(AssertionError):
             _connect(inst, "/chat/completions", b"{}", {}, 5)
@@ -348,3 +376,164 @@ def test_proxy_models_list_includes_tiers():
         data = sj.call_args.args[1]["data"]
         ids = {d["id"] for d in data}
         assert "tier/high" in ids and "tier/mid" in ids and "tier/low" in ids
+
+
+# ── Regression tests for bugs found in a post-hoc review of this feature ──
+
+def test_instance_priority_actually_orders_when_context_ties(registry):
+    """The bug this guards: _INSTANCE_PRIORITY used to never match
+    anything (tuple field order didn't match how it was destructured at
+    lookup time), so every instance silently got the same default
+    priority and ordering only ever came from the context_window
+    tiebreaker. Construct a registry where two instances of the same
+    logical model have IDENTICAL context_window -- if priority weren't
+    actually working, sort order between them would be arbitrary
+    (whatever order the registry dict happens to iterate in); with a
+    working priority table, the higher-priority provider must come
+    first regardless of dict iteration order."""
+    from open_free_router.tiers import _INSTANCE_PRIORITY, _expand_logical
+
+    # Confirm the priority table itself is populated the way callers expect:
+    # a real (logical_id, provider_name) lookup must NOT hit the 1000
+    # fallback for entries actually listed.
+    assert _INSTANCE_PRIORITY[("glm-5.2", "sensenova")] == 0
+    assert _INSTANCE_PRIORITY[("glm-5.2", "nvidia-nim")] == 1
+
+    reg = Registry({
+        "z-provider": {  # sorts after "sensenova" alphabetically/by-dict-order
+            "upstream_url": "https://example.com/v1",
+            "models": [{"id": "glm-5.2", "context_window": 999999}],
+        },
+        "sensenova": {
+            "upstream_url": "https://token.sensenova.cn/v1",
+            "models": [{"id": "glm-5.2", "context_window": 999999}],  # tie
+        },
+    })
+    results = _expand_logical("glm-5.2", reg)
+    priorities = {provider.name: priority for priority, _key, provider, _model in results}
+    # sensenova is explicitly prioritized; z-provider isn't listed at all
+    # (falls back to 1000) -- sensenova must sort first despite z-provider
+    # having no context_window disadvantage and a "later" provider name.
+    assert priorities["sensenova"] < priorities["z-provider"]
+    ordered_providers = [provider.name for _p, _k, provider, _m in
+                          sorted(results, key=lambda t: (t[0], t[1]))]
+    assert ordered_providers[0] == "sensenova"
+
+
+def test_patch_model_strips_internal_routing_keys():
+    """The bug this guards: _patch_model() used to do a plain dict(req)
+    shallow copy, so internal keys proxy.py stashes on the request
+    (_endpoint_path, and _headers if ever populated) rode along into
+    json.dumps() and got sent as real fields in the body forwarded to
+    the actual third-party upstream provider."""
+    from open_free_router.upstream import _patch_model
+    from open_free_router.tiers import UpstreamInstance
+
+    provider = ProviderConfig(name="sensenova", upstream_url="https://token.sensenova.cn/v1",
+                               models=[ModelInfo(id="glm-5.2", upstream_id="glm-5.2")])
+    inst = UpstreamInstance.for_provider(provider, provider.models[0])
+    req = {
+        "model": "tier/high",
+        "messages": [{"role": "user", "content": "hi"}],
+        "_endpoint_path": "chat/completions",
+        "_headers": {"X-Original": "value"},
+    }
+    patched = _patch_model(req, inst)
+    assert "_endpoint_path" not in patched
+    assert "_headers" not in patched
+    assert patched["model"] == "glm-5.2"
+    # only the real request fields must survive
+    assert patched["messages"] == req["messages"]
+    # confirm this is what actually gets serialized and sent upstream,
+    # not just what _patch_model happens to return
+    serialized = json.loads(json.dumps(patched))
+    assert "_endpoint_path" not in serialized
+    assert "_headers" not in serialized
+
+
+def test_forward_tier_streaming_success_returns_closeable_raw_conn():
+    """The bug this guards: TierStreamResult used to only keep the
+    HTTPResponse (confusingly in a field named `conn`), discarding the
+    real HTTPConnection/HTTPSConnection returned by _connect() without
+    ever closing it -- a slow socket leak under sustained tier-streaming
+    traffic. response.close() alone doesn't reliably release the
+    underlying connection's socket, so both must be reachable and the
+    real connection must be independently closeable."""
+    fake_resp = MagicMock()
+    fake_resp.status = 200
+    fake_resp.getheaders.return_value = [("Content-Type", "text/event-stream")]
+    fake_conn = MagicMock()
+
+    provider = ProviderConfig(name="sensenova", upstream_url="https://token.sensenova.cn/v1",
+                               models=[ModelInfo(id="glm-5.2", upstream_id="glm-5.2")])
+    reg = Registry({})
+    reg.providers["sensenova"] = provider
+
+    with patch("open_free_router.upstream._connect", return_value=(fake_resp, fake_conn)):
+        req = {"model": "tier/high", "messages": []}
+        result = forward_tier_streaming("high", reg, req, timeout=5)
+
+    res, inst = result
+    assert res.response is fake_resp
+    assert res.raw_conn is fake_conn
+    # proxy.py's cleanup path calls res.raw_conn.close(), not res.response.close()
+    res.raw_conn.close()
+    fake_conn.close.assert_called_once()
+
+
+def test_every_tier_member_resolves_to_at_least_one_instance(registry):
+    """The bug this guards: TIERS["mid"] used to list "ling-3.0-flash",
+    which matched nothing in the real registry (Zen's actual id has a
+    "-free" suffix; the one manual entry that would have matched under
+    Nous was removed elsewhere as a confirmed-broken mapping) -- a dead
+    tier member that silently shrank the pool with no error or warning.
+    Guards every current tier (except "low", which is a deliberate
+    catch-all with no fixed logical-id list) against this recurring."""
+    from open_free_router.tiers import _expand_logical
+
+    for tier_name in ("high", "mid"):
+        for logical_id in TIERS[tier_name]:
+            matches = _expand_logical(logical_id, registry)
+            assert matches, (
+                f"TIERS[{tier_name!r}] lists {logical_id!r}, which matches "
+                f"zero instances in registry.default.yaml -- dead tier member"
+            )
+
+
+def test_forward_tier_streaming_exhaustion_carries_last_status():
+    """The bug this guards: forward_tier_streaming() used to return a
+    bare None on pool exhaustion, so the client-facing error always said
+    "last HTTP None" even when every instance had actually failed with a
+    real status code -- inconsistent with (and less useful than)
+    forward_tier_buffered()'s TierExhaustedError(tier, last_status)."""
+    provider = ProviderConfig(name="sensenova", upstream_url="https://token.sensenova.cn/v1",
+                               models=[ModelInfo(id="glm-5.2", upstream_id="glm-5.2")])
+    reg = Registry({})
+    reg.providers["sensenova"] = provider
+
+    fake_resp = MagicMock()
+    fake_resp.status = 503
+    fake_resp.read.return_value = b'{"error": "unavailable"}'
+    fake_resp.getheader.return_value = None
+    fake_resp.getheaders.return_value = []
+    fake_conn = MagicMock()
+
+    with patch("open_free_router.upstream._connect", return_value=(fake_resp, fake_conn)):
+        req = {"model": "tier/high", "messages": []}
+        with pytest.raises(TierExhaustedError) as exc_info:
+            forward_tier_streaming("high", reg, req, timeout=5, num_retries=0)
+
+    assert exc_info.value.last_status == 503
+
+
+def test_rebuild_proxy_index_resets_tier_cooldowns():
+    """The bug this guards: reset_tier_state() existed with a docstring
+    saying to call it after a registry rebuild, but nothing in
+    production code actually did -- only tests called it directly to
+    reset state between cases."""
+    from open_free_router.proxy import rebuild_proxy_index
+
+    _router.cooldowns.mark("sensenova/glm-5.2", "60")
+    assert _router.cooldowns.in_cooldown("sensenova/glm-5.2") is True
+    rebuild_proxy_index()
+    assert _router.cooldowns.in_cooldown("sensenova/glm-5.2") is False

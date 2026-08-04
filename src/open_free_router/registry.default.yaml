@@ -146,8 +146,20 @@ sensenova:
   # display name would match the model's actual name
   # ("nova/deepseek-v4-flash") and got a 403 because our registry only
   # recognized "nova/v4-flash".
+  #
+  # context_window/max_tokens added 2026-08-0x: previously omitted, so
+  # both models silently fell back to ModelInfo's defaults (131072 /
+  # 8192) instead of their real values -- harmless for basic routing,
+  # but this directly undermined the tier-routing feature's context-
+  # aware prioritization (a 1M-context model losing to a 128k one in
+  # sort order because its context_window was never actually recorded).
+  # Values are from the same real /v1/models response referenced above.
   - id: deepseek-v4-flash
+    context_window: 1048576
+    max_tokens: 65536
   - id: glm-5.2
+    context_window: 1048576
+    max_tokens: 131072
   prefix: nova
 stepfun:
   upstream_url: https://api.stepfun.com/v1

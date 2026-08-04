@@ -31,7 +31,13 @@ TIERS: dict[str, list[str]] = {
         "laguna-s-2.1",
         "laguna-xs-2.1",
         "mimo-v2.5-free",
-        "ling-3.0-flash",
+        "ling-3.0-flash-free",  # was "ling-3.0-flash" -- matched nothing in the
+                                 # real registry (Zen's actual id has a "-free"
+                                 # suffix; the only other candidate, a Nous
+                                 # manual entry with this bare name, was removed
+                                 # as a confirmed-broken mapping in an earlier
+                                 # fix) -- this tier member silently resolved to
+                                 # zero pool instances with no error or warning.
         "nemotron-3-ultra-550b-a55b",
     ],
     # Low: everything else (small / limited-context / fallback)
@@ -43,17 +49,36 @@ TIER_IDS = ("tier/high", "tier/mid", "tier/low")
 
 # Sensible fallback ordering within a tier: we want the most-capable /
 # widest-context instance first so the user lands on the best available.
-# Order below is "preferred instance" for each logical id; anything not
-# listed falls back to insertion order from the registry.
-_INSTANCE_PRIORITY = {
-    ("glm-5.2", "sensenova"),      # 1M context
-    ("glm-5.2", "nvidia-nim"),
-    ("deepseek-v4-flash", "sensenova"),   # 128k
-    ("deepseek-v4-flash", "nvidia-nim"),
-    ("deepseek-v4-flash", "opencode-zen-free"),
-    ("nemotron-3-ultra-550b-a55b", "openrouter"),   # 1M
-    ("nemotron-3-ultra-550b-a55b", "nvidia-nim"),   # 1M (nemotron reasoning)
-    ("nemotron-3-ultra-550b-a55b", "opencode-zen-free"),
+#
+# Keyed by (logical_id, provider_name) -> priority (lower = more
+# preferred). Anything not listed here gets the default fallback value
+# in _expand_logical() and is ordered purely by the context_window
+# tiebreaker in tier_members().
+#
+# FIXED 2026-08-0x: this was previously a `set` of (logical_id,
+# provider_name) tuples, looked up in _expand_logical() by destructuring
+# each tuple as `(p, uid)` and comparing `p == provider.name` /
+# `uid == model.effective_upstream_id`. That's backwards from how the
+# tuples were actually populated (first element is the logical id, not
+# a provider name; second is the provider name, not an upstream_id) --
+# every lookup silently fell through to the "not listed" default,
+# meaning this preference table never actually influenced ordering.
+# ordering happened to look right anyway (e.g. sensenova's glm-5.2
+# sorting before nvidia-nim's) purely by coincidence of the
+# context_window tiebreaker in tier_members(), which masked the bug --
+# it would have picked the wrong instance for any logical id where the
+# "preferred" one isn't also the largest-context one. Also switched
+# from a `set` to a `dict`: enumerate() over a set doesn't have a
+# stable, meaningful order to assign indices from in the first place.
+_INSTANCE_PRIORITY: dict[tuple[str, str], int] = {
+    ("glm-5.2", "sensenova"): 0,                       # 1M context
+    ("glm-5.2", "nvidia-nim"): 1,
+    ("deepseek-v4-flash", "sensenova"): 0,
+    ("deepseek-v4-flash", "nvidia-nim"): 1,
+    ("deepseek-v4-flash", "opencode-zen-free"): 2,
+    ("nemotron-3-ultra-550b-a55b", "openrouter"): 0,   # 1M
+    ("nemotron-3-ultra-550b-a55b", "nvidia-nim"): 1,   # 1M (nemotron reasoning)
+    ("nemotron-3-ultra-550b-a55b", "opencode-zen-free"): 2,
 }
 
 
@@ -113,23 +138,10 @@ def _expand_logical(logical_id: str, registry: Registry) -> list[tuple[int, str,
     for provider in registry.providers.values():
         for model in provider.models:
             uid = model.effective_upstream_id
-            if model.id == logical_id or _normalize(uid) == logical_id:
-                pass  # matched -> fall through to priority/sort + append
-            else:
+            if model.id != logical_id and _normalize(uid) != logical_id:
                 continue
-            listed = any(
-                p == provider.name and uid == model.effective_upstream_id
-                for p, uid in _INSTANCE_PRIORITY
-            )
-            priority = next(
-                (i for i, (p, uid) in enumerate(_INSTANCE_PRIORITY)
-                 if p == provider.name and uid == model.effective_upstream_id),
-                1000,
-            )
+            priority = _INSTANCE_PRIORITY.get((logical_id, provider.name), 1000)
             found.append((priority, f"{provider.name}/{model.effective_upstream_id}", provider, model))
-    if not found:
-        # allow fallback matching by upstream_id substring for cross-aliases
-        return []
     found.sort(key=lambda t: (t[0], t[1]))
     return found
 
