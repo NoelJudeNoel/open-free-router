@@ -34,11 +34,18 @@ def test_write_pi_models_creates_correct_format(tmp_path):
 
     for name, p in data["providers"].items():
         assert p["baseUrl"] == "http://127.0.0.1:8337/v1"
+        # Pi only shows a provider's models as "available" when the provider
+        # is configured (has an apiKey); the local proxy doesn't validate
+        # incoming creds, so a placeholder per provider satisfies the gate.
+        assert p["apiKey"] == "open-free-router"
         assert "models" in p
         for m in p["models"]:
             assert "id" in m
             assert "contextWindow" in m
             assert "maxTokens" in m
+            # Pi requires an explicit api per model; all providers here
+            # point at the OpenAI-compatible local proxy.
+            assert m["api"] == "openai-completions"
 
     assert data["providers"]["local-free"]["models"][0]["id"] == "or/m1:free"
     assert data["providers"]["deepseek"]["models"][0]["id"] == "ds/deepseek-chat"

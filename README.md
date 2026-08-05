@@ -8,6 +8,7 @@ open-free-router serve
 ```
 
 追踪 7 个 LLM 提供商的免费模型（OpenRouter、NVIDIA NIM、OpenCode Zen、Nous Research、SenseNova、Google AI Studio、Poolside AI），运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表。一次配置，所有 Agent（Hermes、OpenCode、PI、OMP）共享模型。
+追踪 9 个 LLM 提供商的免费模型（OpenRouter、NVIDIA NIM、OpenCode Zen、Nous Research、StepFun、SenseNova、Groq、Google AI Studio、Poolside AI），运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表，当某一LLM api额度用尽时，自动轮替接续不同上游的同一档次模型，设为三档，高档为glm-5.2、deepseek-v4-flash、gemini-3.6-flash。一次配置，所有 Agent（Hermes、OpenCode、PI、OMP）共享模型。
 
 ## 安装
 
@@ -148,6 +149,16 @@ registry_git_history: false
 - 请求体里的 `messages` 长度会做粗略估算，上下文窗口明显不够的实例会被提前过滤掉，不浪费一次请求。
 - 整档全部实例都失败时返回 429，带最后一次真实上游状态码。
 - 这套优选顺序（`tiers.py` 里的 `_INSTANCE_PRIORITY`）和逻辑模型清单目前是硬编码维护的，不会随 `refresh` 自动更新——供应商加了新模型或某个模型下线，需要手动同步进 `tiers.py`。
+
+### 可观测性
+
+三层，让"这次到底是谁服务的"、"路由整体表现如何"不再是黑盒：
+
+1. **单次请求级别**：非流式的 `tier/*` 请求，响应体里的 `model` 字段会从请求时的别名（`tier/high`）改写成实际服务的实例（`sensenova/glm-5.2`）——跟 OpenAI 自己的 API 在 `gpt-4` 这类别名解析到具体快照版本时的做法一样，任何已经在展示"当前模型：`<字段>`"的客户端不用改代码就能看到真实结果。流式响应**故意不做这个改写**——要做就得对每一行 SSE 都解析+重新序列化，牺牲现在低开销的逐行透传方式，所以流式响应里看到的是上游自己返回的裸模型名（比如 `glm-5.2`），没有供应商前缀，但依然是真实、可用的信息。
+2. **聚合状态**：`GET /api/status` 的 `tiers` 字段包含每个 tier 下每个实例的成功/失败次数和当前冷却状态，仪表盘上也有对应的"Tier Routing"展示卡片。
+3. **事件日志**：实例进入冷却、整档耗尽时，会往 stdout 打一行 `[tier] ...` 日志（跟调度器的 `[scheduler] ...` 风格一致），不用对着 `/api/status` 的快照猜时间线，日志里直接看得到"发生了什么、为什么切换"。
+
+三层都只在内存里（进程重启或注册表重建时清空），这是"这个进程最近表现如何"，不是持久化的指标存储。
 
 ## API 端点
 

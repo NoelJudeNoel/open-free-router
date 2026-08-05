@@ -100,6 +100,16 @@ class _UIHandler(BaseHTTPRequestHandler):
                 "model_count": len(p.models),
                 "models": [m.id for m in p.models],
             })
+        # Tier-routing observability (tier/high|mid|low): per-instance
+        # success/failure counts and current cooldown status, so
+        # "how has routing actually behaved" is visible without having
+        # to tail server logs. See upstream.py's tier_status() docstring
+        # for the full picture -- this is layer 2 of 3; layer 1 is the
+        # rewritten `model` field on non-streaming tier responses, layer
+        # 3 is the [tier] event log lines on cooldown/exhaustion.
+        if self.reg:
+            from open_free_router.upstream import tier_status
+            status["tiers"] = tier_status(self.reg)
         self._send_json(200, status)
 
     def _api_models(self):
