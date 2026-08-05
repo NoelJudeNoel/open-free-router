@@ -1,15 +1,17 @@
-"""Tests for refresh_sources/groq.py, google_ai_studio.py, poolside.py --
+"""Tests for refresh_sources/google_ai_studio.py, poolside.py --
 previously had zero dedicated coverage (same blind spot as nvidia_nim.py
-before it). Sample payloads are shaped to match each provider's real
-/v1/models (or Gemini-style /models) response format, based on entries
-confirmed via web research on 2026-08-02 -- see each module's own
-KNOWN_FREE comment for exact confidence/sourcing per entry.
+before it; groq.py also got coverage in this same original pass, but
+was later removed as a provider entirely). Sample payloads are shaped
+to match each provider's real /v1/models (or Gemini-style /models)
+response format, based on entries confirmed via web research on
+2026-08-02 -- see each module's own KNOWN_FREE comment for exact
+confidence/sourcing per entry.
 """
 from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
 
-from open_free_router.refresh_sources import groq, google_ai_studio, poolside
+from open_free_router.refresh_sources import google_ai_studio, poolside
 
 
 def _mock_response(json_data):
@@ -17,61 +19,6 @@ def _mock_response(json_data):
     resp.raise_for_status = MagicMock()
     resp.json.return_value = json_data
     return resp
-
-
-class TestGroq:
-    SAMPLE = {
-        "data": [
-            {"id": "openai/gpt-oss-20b", "context_window": 131072},
-            {"id": "openai/gpt-oss-120b", "context_window": 131072},
-            {"id": "llama-guard-3-8b", "context_window": 8192},
-            # present upstream, must be excluded -- deprecated by Groq
-            # 2026-06-17, shutdown 2026-08-16 per Groq's own deprecations page
-            {"id": "llama-3.3-70b-versatile", "context_window": 131072},
-            {"id": "llama-3.1-8b-instant", "context_window": 131072},
-            # present upstream, must be excluded (removed in an earlier pass)
-            {"id": "gemma2-9b-it", "context_window": 8192},
-            {"id": "mixtral-8x7b-32768", "context_window": 32768},
-        ]
-    }
-
-    def test_no_api_key_returns_empty(self):
-        assert groq.fetch("https://api.groq.com/openai/v1", api_key=None) == []
-
-    @patch("requests.get")
-    def test_removed_models_excluded_even_if_still_upstream(self, mock_get):
-        """The whole point of the removal: even if Groq's API still
-        happens to list these IDs, they must not come back just because
-        they're technically present in the response."""
-        mock_get.return_value = _mock_response(self.SAMPLE)
-        models = groq.fetch("https://api.groq.com/openai/v1", api_key="gsk-test")
-        ids = {m.id for m in models}
-        assert "gemma2-9b-it" not in ids
-        assert "mixtral-8x7b-32768" not in ids
-        assert "llama-3.3-70b-versatile" not in ids
-        assert "llama-3.1-8b-instant" not in ids
-
-    @patch("requests.get")
-    def test_current_known_free_included(self, mock_get):
-        mock_get.return_value = _mock_response(self.SAMPLE)
-        models = groq.fetch("https://api.groq.com/openai/v1", api_key="gsk-test")
-        ids = {m.id for m in models}
-        assert ids == set(groq.KNOWN_FREE)
-
-    @patch("requests.get")
-    def test_gpt_oss_models_flagged_reasoning(self, mock_get):
-        mock_get.return_value = _mock_response(self.SAMPLE)
-        models = groq.fetch("https://api.groq.com/openai/v1", api_key="gsk-test")
-        by_id = {m.id: m for m in models}
-        assert by_id["openai/gpt-oss-20b"].reasoning is True
-        assert by_id["openai/gpt-oss-120b"].reasoning is True
-
-    @patch("requests.get")
-    def test_guard_model_flagged_non_reasoning(self, mock_get):
-        mock_get.return_value = _mock_response(self.SAMPLE)
-        models = groq.fetch("https://api.groq.com/openai/v1", api_key="gsk-test")
-        by_id = {m.id: m for m in models}
-        assert by_id["llama-guard-3-8b"].reasoning is False
 
 
 class TestGoogleAiStudio:

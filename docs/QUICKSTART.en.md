@@ -16,7 +16,7 @@ Hermes). Each needs its own "API URL + API key" to use a model — that's tediou
 **open-free-router does three things for you:**
 
 1. **Aggregates free models** — automatically tracks the **free** model lists
-   across 9 providers (OpenRouter, Google, Groq, NVIDIA, etc.), so you don't
+   across 7 providers (OpenRouter, Google, NVIDIA, etc.), so you don't
    have to watch for updates yourself.
 2. **One URL for everything** — runs a local proxy on your machine
    (`http://127.0.0.1:8337`). All your agents point at this one URL, and it

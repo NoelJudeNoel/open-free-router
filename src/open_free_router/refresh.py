@@ -10,11 +10,9 @@ from open_free_router.refresh_sources import (
     openrouter,
     nvidia_nim,
     google_ai_studio,
-    groq,
     poolside,
     nous,
     sensenova,
-    stepfun,
     opencode_zen,
 )
 
@@ -23,11 +21,9 @@ SOURCE_MAP = {
     "openrouter": openrouter,
     "nvidia-nim": nvidia_nim,
     "google-ai-studio": google_ai_studio,
-    "groq": groq,
     "poolside": poolside,
     "nous": nous,
     "sensenova": sensenova,
-    "stepfun": stepfun,
     "opencode-zen-free": opencode_zen,
 }
 

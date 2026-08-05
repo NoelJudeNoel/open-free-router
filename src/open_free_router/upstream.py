@@ -147,9 +147,9 @@ def _connect(inst: UpstreamInstance, path: str, data: bytes,
 
     `path` is the endpoint suffix (e.g. "/chat/completions"); the upstream
     URL's own path prefix (e.g. "/v1" for sensenova, "/v1beta" for google, or
-    "/openai/v1" for groq) is prepended so the final request hits the real
-    OpenAI-compatible route — mirroring how proxy.py builds
-    ``f"{upstream_url}/{endpoint_suffix}"``.
+    "/openai/v1" style prefixes some providers use) is prepended so the
+    final request hits the real OpenAI-compatible route — mirroring how
+    proxy.py builds ``f"{upstream_url}/{endpoint_suffix}"``.
     """
     url = urlsplit(inst.provider.upstream_url)
     # base path from upstream URL, with no trailing slash

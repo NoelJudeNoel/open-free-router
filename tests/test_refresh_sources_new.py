@@ -1,7 +1,9 @@
-"""Tests for the four refresh_sources modules added to close the gap
-between README's "10 auto-refreshing providers" claim and the 6 that
-previously had SOURCE_MAP entries: nous, sensenova, stepfun,
-opencode_zen.
+"""Tests for the refresh_sources modules added to close the gap
+between README's original "10 auto-refreshing providers" claim and the
+6 that previously had SOURCE_MAP entries: nous, sensenova,
+opencode_zen (stepfun was also added in this same original pass, but
+was later removed as a provider entirely -- see git history for that
+module's tests before removal).
 
 Sample payloads below are trimmed/adapted from real (sanitized) API
 responses captured manually against each provider on 2026-07-31 -- not
@@ -14,7 +16,7 @@ from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
 
-from open_free_router.refresh_sources import nous, sensenova, stepfun, opencode_zen
+from open_free_router.refresh_sources import nous, sensenova, opencode_zen
 
 
 def _mock_response(json_data, status=200):
@@ -125,35 +127,6 @@ class TestSensenova:
         mock_get.return_value = _mock_response(self.SAMPLE)
         models = sensenova.fetch("https://token.sensenova.cn/v1", api_key="sk-test")
         assert models[0].reasoning is True
-
-
-class TestStepfun:
-    # Adapted from a real (sanitized) response — no pricing field at all.
-    SAMPLE = {
-        "data": [
-            {"id": "step-tts-mini", "object": "model", "owned_by": "stepai"},
-            {"id": "step-3.5-flash", "object": "model", "owned_by": "stepai"},
-            {"id": "step-3.5-flash-2603", "object": "model", "owned_by": "stepai"},
-        ]
-    }
-
-    def test_no_api_key_returns_empty(self):
-        assert stepfun.fetch("https://api.stepfun.com/v1", api_key=None) == []
-
-    @patch("requests.get")
-    def test_only_known_free_allowlisted(self, mock_get):
-        mock_get.return_value = _mock_response(self.SAMPLE)
-        models = stepfun.fetch("https://api.stepfun.com/v1", api_key="sk-test")
-        ids = [m.id for m in models]
-        assert ids == ["step-3.5-flash"]
-        assert "step-tts-mini" not in ids
-        assert "step-3.5-flash-2603" not in ids  # not in KNOWN_FREE even though it exists
-
-    @patch("requests.get")
-    def test_model_no_longer_present_yields_empty(self, mock_get):
-        mock_get.return_value = _mock_response({"data": [{"id": "step-tts-mini"}]})
-        models = stepfun.fetch("https://api.stepfun.com/v1", api_key="sk-test")
-        assert models == []
 
 
 class TestOpencodeZen:
