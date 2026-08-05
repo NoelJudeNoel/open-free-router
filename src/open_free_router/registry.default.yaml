@@ -7,19 +7,6 @@ google-ai-studio:
   - id: gemini-3.6-flash
   - id: gemini-3.5-flash-lite
   prefix: gai
-groq:
-  upstream_url: https://api.groq.com/openai/v1
-  auto_refresh: false
-  refresh_method: manual
-  api_key: ''
-  models:
-  - id: gpt-oss-20b
-    upstream_id: openai/gpt-oss-20b
-    reasoning: true
-  - id: gpt-oss-120b
-    upstream_id: openai/gpt-oss-120b
-    reasoning: true
-  prefix: gq
 nvidia-nim:
   upstream_url: https://integrate.api.nvidia.com/v1
   auto_refresh: false
@@ -161,11 +148,3 @@ sensenova:
     context_window: 1048576
     max_tokens: 131072
   prefix: nova
-stepfun:
-  upstream_url: https://api.stepfun.com/v1
-  auto_refresh: false
-  refresh_method: stepfun_api
-  api_key: ''
-  models:
-  - id: step-3.5-flash
-  prefix: sf

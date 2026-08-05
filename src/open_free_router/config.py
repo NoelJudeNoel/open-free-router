@@ -15,7 +15,6 @@ DEFAULT_CONFIG_PATHS = [
 # Map registry provider names → PI-compatible names.
 _PI_PROVIDER_NAMES: dict[str, str] = {
     "openrouter": "local-free",
-    "groq": "local-groq",
 }
 
 

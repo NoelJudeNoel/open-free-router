@@ -142,8 +142,10 @@ def test_mid_pool_fuzzy_upstream_id_match(registry):
 def test_connect_prepends_upstream_path_prefix(registry):
     """Regression: the tier path must keep the upstream URL's path prefix
     (e.g. '/v1' in https://token.sensenova.cn/v1) when building the request
-    path — otherwise sensenova/nvidia/groq all return 404. Mirrors proxy.py's
-    ``f"{upstream_url}/{endpoint_suffix}"`` string concatenation."""
+    path — otherwise sensenova/nvidia/google-ai-studio all return 404.
+    Mirrors proxy.py's ``f"{upstream_url}/{endpoint_suffix}"`` string
+    concatenation.
+    """
     from open_free_router.upstream import _connect
 
     captured = {}
@@ -180,14 +182,16 @@ def test_connect_prepends_upstream_path_prefix(registry):
     assert captured["path"] == "/v1/chat/completions", captured
     assert captured["host"] == "token.sensenova.cn"
 
-    # groq upstream is https://api.groq.com/openai/v1 -> base /openai/v1
-    groq = registry.providers["groq"]
-    ginst = UpstreamInstance.for_provider(groq, groq.models[0])
+    # google-ai-studio upstream is https://generativelanguage.googleapis.com/v1beta
+    # -> base /v1beta (a distinctively non-"/v1" prefix, so this exercises
+    # something the sensenova check above wouldn't catch on its own)
+    gai = registry.providers["google-ai-studio"]
+    gai_inst = UpstreamInstance.for_provider(gai, gai.models[0])
     captured.clear()
     with patch("open_free_router.upstream.http.client.HTTPSConnection", _NoNetHTTPS):
         with pytest.raises(AssertionError):
-            _connect(ginst, "/chat/completions", b"{}", {}, 5)
-    assert captured["path"] == "/openai/v1/chat/completions", captured
+            _connect(gai_inst, "/chat/completions", b"{}", {}, 5)
+    assert captured["path"] == "/v1beta/chat/completions", captured
 
 
 def test_pool_priority_orders_best_first(registry):

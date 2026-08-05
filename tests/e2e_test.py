@@ -102,7 +102,7 @@ except Exception as e:
 # ── Phase 3: Agent Routing Test ────────────────────────────
 print("\n[Phase 3] Agent Routing (model IDs → upstream via 8337)")
 
-for provider, model in [("openrouter","or/nemotron-3-nano:free"),("sensenova","nova/glm-5.2"),("stepfun","sf/step-3.5-flash"),("groq","gq/gpt-oss-20b")]:
+for provider, model in [("openrouter","or/nemotron-3-nano:free"),("sensenova","nova/glm-5.2"),("nvidia-nim","nv/glm-5.2")]:
     # nous intentionally omitted: its only two manual model entries were
     # removed 2026-08-02 (one confirmed broken in real production use,
     # the other unverified with the same risk profile) -- there's

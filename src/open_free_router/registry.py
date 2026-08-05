@@ -73,7 +73,7 @@ def git_commit_registry(path: Path, message: str = "registry.yaml update") -> No
 
 @dataclass
 class ModelInfo:
-    id: str  # Short display ID (e.g. "glm-5.2", "step-3.5-flash")
+    id: str  # Short display ID (e.g. "glm-5.2", "gemini-3.6-flash")
     upstream_id: str = ""  # Upstream API model ID (e.g. "z-ai/glm-5.2"). Falls back to id.
     name: str = ""
     context_window: int = 131072

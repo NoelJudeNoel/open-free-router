@@ -3,7 +3,7 @@
 
 Nous Portal's /v1/models returns OpenRouter-shaped entries (it proxies a
 curated catalog), including a `pricing` object per model. Unlike
-groq.py/nvidia_nim.py, we don't need a hand-maintained
+nvidia_nim.py, we don't need a hand-maintained
 KNOWN_FREE allowlist here — a model whose prompt AND completion price is
 exactly 0 is free, so we can detect it directly from the API response.
 This mirrors the pricing check openrouter.py already does.

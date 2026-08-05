@@ -20,27 +20,27 @@ class TestUpstreamUrlAnchoring:
     def test_malicious_upstream_url_on_known_provider_is_overridden(self):
         reg = Registry({})
         malicious = ProviderConfig(
-            name="stepfun",
+            name="nvidia-nim",
             upstream_url="https://attacker.example.com/v1",
             api_key="sk-real-key",
-            models=[ModelInfo(id="step-3.5-flash")],
+            models=[ModelInfo(id="glm-5.2")],
         )
         pinned = reg.add_provider(malicious)
         assert pinned is True
-        assert reg.get("stepfun").upstream_url == CANONICAL_UPSTREAM_URLS["stepfun"]
-        assert reg.get("stepfun").upstream_url != "https://attacker.example.com/v1"
+        assert reg.get("nvidia-nim").upstream_url == CANONICAL_UPSTREAM_URLS["nvidia-nim"]
+        assert reg.get("nvidia-nim").upstream_url != "https://attacker.example.com/v1"
 
     def test_correct_upstream_url_on_known_provider_not_flagged(self):
         reg = Registry({})
         p = ProviderConfig(
-            name="stepfun",
-            upstream_url=CANONICAL_UPSTREAM_URLS["stepfun"],
+            name="nvidia-nim",
+            upstream_url=CANONICAL_UPSTREAM_URLS["nvidia-nim"],
             api_key="sk-real-key",
-            models=[ModelInfo(id="step-3.5-flash")],
+            models=[ModelInfo(id="glm-5.2")],
         )
         pinned = reg.add_provider(p)
         assert pinned is False
-        assert reg.get("stepfun").upstream_url == CANONICAL_UPSTREAM_URLS["stepfun"]
+        assert reg.get("nvidia-nim").upstream_url == CANONICAL_UPSTREAM_URLS["nvidia-nim"]
 
     def test_custom_unknown_provider_keeps_free_form_upstream_url(self):
         """A provider name that has no refresh_sources module (i.e. the
@@ -63,12 +63,12 @@ class TestUpstreamUrlAnchoring:
         re-anchored every time, not just on first creation."""
         reg = Registry({})
         reg.add_provider(ProviderConfig(
-            name="stepfun", upstream_url=CANONICAL_UPSTREAM_URLS["stepfun"],
-            api_key="sk-1", models=[ModelInfo(id="step-3.5-flash")],
+            name="nvidia-nim", upstream_url=CANONICAL_UPSTREAM_URLS["nvidia-nim"],
+            api_key="sk-1", models=[ModelInfo(id="glm-5.2")],
         ))
         pinned = reg.add_provider(ProviderConfig(
-            name="stepfun", upstream_url="https://attacker.example.com/v1",
-            api_key="sk-1", models=[ModelInfo(id="step-3.5-flash")],
+            name="nvidia-nim", upstream_url="https://attacker.example.com/v1",
+            api_key="sk-1", models=[ModelInfo(id="glm-5.2")],
         ))
         assert pinned is True
-        assert reg.get("stepfun").upstream_url == CANONICAL_UPSTREAM_URLS["stepfun"]
+        assert reg.get("nvidia-nim").upstream_url == CANONICAL_UPSTREAM_URLS["nvidia-nim"]

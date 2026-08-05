@@ -7,6 +7,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-route
 open-free-router serve
 ```
 
+追踪 7 个 LLM 提供商的免费模型（OpenRouter、NVIDIA NIM、OpenCode Zen、Nous Research、SenseNova、Google AI Studio、Poolside AI），运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表。一次配置，所有 Agent（Hermes、OpenCode、PI、OMP）共享模型。
 追踪 9 个 LLM 提供商的免费模型（OpenRouter、NVIDIA NIM、OpenCode Zen、Nous Research、StepFun、SenseNova、Groq、Google AI Studio、Poolside AI），运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表，当某一LLM api额度用尽时，自动轮替接续不同上游的同一档次模型，设为三档，高档为glm-5.2、deepseek-v4-flash、gemini-3.6-flash。一次配置，所有 Agent（Hermes、OpenCode、PI、OMP）共享模型。
 
 ## 安装
@@ -126,7 +127,7 @@ registry_git_history: false
 - **真流式转发** —— `stream: true` 的请求逐行透传上游 SSE，不会缓冲整个响应后一次性返回
 - **User-Agent 标识** —— 转发时带 `open-free-router/0.1`，避免 Cloudflare 1010 拦截
 - **零依赖 Web 框架** —— 使用 Python stdlib `http.server`，无需 Flask/FastAPI
-- **刷新源可插拔** —— `refresh_sources/` 下每 provider 一个模块，导出 `fetch(base_url, api_key) → list[ModelInfo]`。OpenRouter/Nous/SenseNova 按 pricing 字段自动识别免费模型（结构性信号，最可靠）；OpenCode Zen 按 `-free` ID 后缀 + 少量硬编码例外识别；NVIDIA NIM/Groq/Google AI Studio/StepFun/Poolside 上游 API 不带 pricing 字段，用人工维护的白名单——这几家的"自动刷新"准确说是"自动核对白名单里的 ID 是否还存在"，不是"自动发现新的免费模型"，白名单本身的新鲜度需要持有对应 key 的人定期用真实 API 返回核对
+- **刷新源可插拔** —— `refresh_sources/` 下每 provider 一个模块，导出 `fetch(base_url, api_key) → list[ModelInfo]`。OpenRouter/Nous/SenseNova 按 pricing 字段自动识别免费模型（结构性信号，最可靠）；OpenCode Zen 按 `-free` ID 后缀 + 少量硬编码例外识别；NVIDIA NIM/Google AI Studio/Poolside 上游 API 不带 pricing 字段，用人工维护的白名单——这几家的"自动刷新"准确说是"自动核对白名单里的 ID 是否还存在"，不是"自动发现新的免费模型"，白名单本身的新鲜度需要持有对应 key 的人定期用真实 API 返回核对
 - **同步保留手工配置** —— 写 Agent 配置文件时（如 OMP 的 `models.yml`）用 `ruamel.yaml` 结构化编辑而非文本替换，只增删指向本地代理的条目，其余手工配置的 provider、注释、格式原样保留
 - **调度器容错** —— 定时刷新循环内任意一步抛出异常都不会杀死后台线程，会记录完整堆栈到 stderr 并在下一个周期重试；仪表盘能通过 `/api/status` 看到最近一次是否失败，避免"自动刷新静默失效、用户毫无感知"
 - **变化才写盘** —— 只有当 `refresh()` 检测到真实的模型列表变化时，才会重写 registry 备份和所有 Agent 的同步文件；一次没有变化的常规刷新不会产生任何多余的磁盘写入

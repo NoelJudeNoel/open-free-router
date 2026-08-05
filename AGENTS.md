@@ -51,7 +51,7 @@ src/open_free_router/
 ├── tiers.py              # Tier routing: tier/high|mid|low → ordered pool of upstream instances, _INSTANCE_PRIORITY
 ├── upstream.py           # Tier forwarding driver: retry/cooldown/failover policy, TierExhaustedError, streaming
 ├── refresh.py            # Dispatches per-provider refresh; SOURCE_MAP + CANONICAL_UPSTREAM_URLS (for pinning)
-├── refresh_sources/      # Pluggable fetch() per provider: openrouter, nvidia_nim, opencode_zen, sensenova, stepfun, google_ai_studio, groq, nous, poolside
+├── refresh_sources/      # Pluggable fetch() per provider: openrouter, nvidia_nim, opencode_zen, sensenova, google_ai_studio, nous, poolside
 ├── serve.py              # Daemon: proxy + UI + scheduler + Pi models.json writer
 ├── sync.py               # Sync registry to Pi/OMP/OpenCode/Hermes configs (dedup-aware, ruamel for OMP)
 ├── ui.py                 # Web dashboard (9057): status, provider CRUD, refresh, config edit (token-gated POST)
@@ -105,12 +105,13 @@ src/open_free_router/
 - CI: `.github/workflows/tests.yml` runs the suite on Python 3.11 + 3.12
 - Some refresh sources hit live provider APIs and are not covered by CI (network-dependent); verify with `open-free-router refresh --source NAME` when changing them
 
-## Supported providers (9)
+## Supported providers (7)
 
-openrouter, nvidia-nim, opencode-zen-free, sensenova, stepfun, google-ai-studio, groq, nous, poolside
+openrouter, nvidia-nim, opencode-zen-free, sensenova, google-ai-studio, nous, poolside
 
 - DeepSeek was removed as a direct provider (2026-07): its models are reached via NVIDIA NIM / SenseNova instead
-- Free-model detection: OpenRouter/Nous/SenseNova read `pricing` fields (structural); OpenCode Zen uses `-free` suffix + hardcoded exceptions; NVIDIA NIM/Groq/Google AI Studio/StepFun/Poolside use hand-maintained allowlists (`KNOWN_FREE`) that only get verified when a real key runs refresh
+- Groq and StepFun were removed as direct providers (2026-08): StepFun's model is still reachable via NVIDIA NIM's own separately-hosted copy (`stepfun-ai/step-3.7-flash`)
+- Free-model detection: OpenRouter/Nous/SenseNova read `pricing` fields (structural); OpenCode Zen uses `-free` suffix + hardcoded exceptions; NVIDIA NIM/Google AI Studio/Poolside use hand-maintained allowlists (`KNOWN_FREE`) that only get verified when a real key runs refresh
 
 ## Related
 
