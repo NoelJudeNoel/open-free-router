@@ -1,14 +1,13 @@
 # open-free-router
 
+追踪 7 个 LLM 提供商的免费模型（OpenRouter、NVIDIA NIM、OpenCode Zen、Nous Research、SenseNova、Google AI Studio、Poolside AI），运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表，当某一LLM api额度用尽时，自动轮替接续不同上游的同一档次模型，设为三档，高档为glm-5.2、deepseek-v4-flash、gemini-3.6-flash。一次配置，所有 Agent（Hermes、OpenCode、PI、OMP）共享模型。
+
 **一条命令跑起所有服务：** proxy(8337) + UI(9057) + 定时刷新(12h)
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/NoelJudeNoel/open-free-router/main/scripts/install.sh)
 open-free-router serve
 ```
-
-追踪 7 个 LLM 提供商的免费模型（OpenRouter、NVIDIA NIM、OpenCode Zen、Nous Research、SenseNova、Google AI Studio、Poolside AI），运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表。一次配置，所有 Agent（Hermes、OpenCode、PI、OMP）共享模型。
-追踪 9 个 LLM 提供商的免费模型（OpenRouter、NVIDIA NIM、OpenCode Zen、Nous Research、StepFun、SenseNova、Groq、Google AI Studio、Poolside AI），运行本地代理按模型 ID 路由到对应上游，自动刷新模型列表，当某一LLM api额度用尽时，自动轮替接续不同上游的同一档次模型，设为三档，高档为glm-5.2、deepseek-v4-flash、gemini-3.6-flash。一次配置，所有 Agent（Hermes、OpenCode、PI、OMP）共享模型。
 
 ## 安装
 
