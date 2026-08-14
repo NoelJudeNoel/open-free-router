@@ -42,7 +42,7 @@ class Config:
         self.proxy_port = int(self._raw.get("proxy", {}).get("port", 8337))
 
         # scheduler
-        self.refresh_interval_hours = int(self._raw.get("refresh_interval_hours", 12))
+        self.refresh_interval_hours = max(1, int(self._raw.get("refresh_interval_hours", 12)))
 
         # proxy upstream timeout
         self.upstream_timeout = int(self._raw.get("upstream_timeout", 120))

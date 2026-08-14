@@ -242,6 +242,39 @@ def test_cooldown_expires():
     assert not cd.in_cooldown("x")
 
 
+@pytest.mark.parametrize("value,expected_min", [
+    ("0.1", 0),
+    ("5", 5),
+    ("120", 120),
+])
+def test_parse_retry_after_delta_seconds(value, expected_min):
+    """delta-seconds Retry-After (the common case) is parsed as a float."""
+    parsed = _Cooldown._parse_retry_after(value)
+    assert parsed is not None and parsed >= expected_min
+
+
+def test_parse_retry_after_http_date():
+    """HTTP-date format Retry-After (e.g. \"Wed, 21 Oct 2099 07:28:00 GMT\")
+    must be parsed too -- some upstreams return dates, not bare seconds.
+    Previously this raised ValueError and silently fell back to the default
+    60s cooldown instead of honoring the real window."""
+    from datetime import datetime, timezone, timedelta
+    future = (datetime.now(timezone.utc) + timedelta(seconds=30)).strftime(
+        "%a, %d %b %Y %H:%M:%S GMT")
+    parsed = _Cooldown._parse_retry_after(future)
+    assert parsed is not None
+    assert 25 <= parsed <= 35
+
+
+def test_parse_retry_after_invalid_returns_none():
+    """Garbage Retry-After values fall back to the default cooldown (60s) via
+    the `or DEFAULT_COOLDOWN` in _Cooldown.mark() -- _parse_retry_after
+    itself must return None so mark() can apply the fallback."""
+    assert _Cooldown._parse_retry_after("not-a-date-or-number") is None
+    assert _Cooldown._parse_retry_after("") is None
+    assert _Cooldown._parse_retry_after(None) is None
+
+
 # retryable status classification
 @pytest.mark.parametrize("code", [429, 500, 502, 503, 504])
 def test_retryable_codes(code):

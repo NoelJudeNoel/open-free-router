@@ -42,3 +42,21 @@ def test_config_registry_absolute_path(tmp_path):
     cfg_path.write_text(f"registry: {reg_path}\n")
     cfg = Config(config_path=cfg_path)
     assert cfg.registry_path == reg_path
+
+
+def test_config_refresh_interval_clamped_to_minimum_1(tmp_path):
+    """refresh_interval_hours of 0 (or negative) would cause the scheduler
+    to spin: threading.Event.wait(0) returns immediately, busy-looping
+    and burning CPU. It must be clamped to a minimum of 1."""
+    for bad in ("0", "-1", "-5"):
+        cfg_path = tmp_path / f"cfg-{bad}.yaml"
+        cfg_path.write_text(f"refresh_interval_hours: {bad}\n")
+        cfg = Config(config_path=cfg_path)
+        assert cfg.refresh_interval_hours == 1, f"{bad} did not clamp to 1"
+
+
+def test_config_refresh_interval_normal_value(tmp_path):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("refresh_interval_hours: 24\n")
+    cfg = Config(config_path=cfg_path)
+    assert cfg.refresh_interval_hours == 24

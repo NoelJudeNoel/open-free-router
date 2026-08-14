@@ -12,7 +12,6 @@ import json
 import socket
 import threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen

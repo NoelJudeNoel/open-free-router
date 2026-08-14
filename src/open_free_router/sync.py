@@ -95,11 +95,16 @@ def _backup():
             shutil.copy2(str(f), str(BACKUP_DIR / f.name))
 
 
-def _mask_key(key: str) -> str:
+def _real_key_or_placeholder(key: str) -> str:
     """Return the real API key, or a placeholder if none is configured.
 
-    The proxy needs real upstream keys to authenticate with provider APIs.
-    Using masked/fake keys would cause all requests to fail with auth errors.
+    WARNING: this returns the full real key, NOT a masked version. The
+    function name is deliberately honest: sync writes real keys to agent
+    config files (Pi, OMP, OpenCode, Hermes) because each agent proxies
+    through the local router and needs the real upstream key. If you want
+    to avoid storing keys in agent configs, set the router's proxy to use
+    a fixed placeholder (like Pi already does with "open-free-router")
+    and have the agent send all requests through the router's auth.
     """
     return key or "sk-no-key"
 
@@ -168,7 +173,7 @@ def sync_omp(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.
 
     changes = []
     for name, p in reg.providers.items():
-        key = _mask_key(p.effective_key)
+        key = _real_key_or_placeholder(p.effective_key)
         block = CommentedMap()
         block["baseUrl"] = proxy_url
         block["apiKey"] = key
@@ -246,7 +251,7 @@ def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http:/
     # Write fresh entries from registry
     changes = []
     for name, p in reg.providers.items():
-        key = _mask_key(p.effective_key)
+        key = _real_key_or_placeholder(p.effective_key)
         models_map = {}
         for m in p.models:
             mkey = m.id.split("/")[-1].replace(":free", "")

@@ -2,11 +2,8 @@
 """open-free-router daemon — proxy + UI + scheduler in one process."""
 from __future__ import annotations
 
-import json
-import time
 import traceback
 import threading
-import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path

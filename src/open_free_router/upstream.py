@@ -79,10 +79,23 @@ class _Cooldown:
     def _parse_retry_after(value: str | None) -> float | None:
         if not value:
             return None
+        # Try: delta-seconds (e.g. "120")
         try:
             return float(value)
         except ValueError:
+            pass
+        # Try: HTTP-date (e.g. "Wed, 21 Oct 2015 07:28:00 GMT")
+        import email.utils
+        from datetime import datetime, timezone
+        try:
+            parsed = email.utils.parsedate_to_datetime(value)
+        except (ValueError, TypeError):
             return None
+        if parsed is not None:
+            now = datetime.now(timezone.utc)
+            delta = (parsed - now).total_seconds()
+            return max(0, delta)
+        return None
 
 
 class _TierStats:
