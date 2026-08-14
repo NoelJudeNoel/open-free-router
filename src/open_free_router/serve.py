@@ -2,9 +2,12 @@
 """open-free-router daemon — proxy + UI + scheduler in one process."""
 from __future__ import annotations
 
-import traceback
-import threading
+import os
+import signal
 import sys
+import threading
+import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,9 +31,15 @@ class Daemon:
         self.cfg = cfg
         self.reg = Registry.load(cfg.registry_path)
         self._proxy_server = None
+        self._proxy_handler = None  # handler class created by run_proxy()
         self._lock_file = None
         self._pidfile = None
         self._stop = threading.Event()
+        # Set by the SIGUSR1 handler / registry watchdog when the registry
+        # file changed on disk; the main serve() loop performs the reload.
+        self._reload_requested = threading.Event()
+        # mtime of registry.yaml at last (re)load — used by the watchdog.
+        self._registry_mtime = None
         # Shared mutable dict (not two separate scalar attrs) so the UI
         # thread, which gets a reference to this same object, always sees
         # the current value rather than whatever it was at thread-start
@@ -76,6 +85,55 @@ class Daemon:
         while not self._stop.wait(interval_hours * 3600):
             self._run_cycle()
 
+    def _reload_registry(self):
+        """Reload registry.yaml from disk into the running daemon so a
+        CLI `refresh`/`add`/`sync` (or a manual edit of registry.yaml)
+        takes effect without restarting serve.
+
+        Updates every live reference: Daemon.reg (used by the scheduler),
+        the proxy handler's registry + model index, and the UI handler's
+        reg. Tier cooldown state is reset via rebuild_proxy_index().
+        Agent configs are NOT rewritten here — that stays the job of
+        `open-free-router sync` / the scheduler cycle, so a CLI refresh
+        that only wants to update the model list doesn't unexpectedly
+        overwrite Pi/OMP/OpenCode/Hermes files.
+        """
+        try:
+            new_reg = Registry.load(self.cfg.registry_path)
+        except Exception as e:
+            print(f"[reload] registry reload FAILED (keeping current): {e}", file=sys.stderr)
+            return False
+        self.reg = new_reg
+        if self._proxy_handler is not None:
+            self._proxy_handler.registry = new_reg
+        from open_free_router.proxy import _ACTIVE_HANDLER
+        if _ACTIVE_HANDLER is not None:
+            _ACTIVE_HANDLER.registry = new_reg
+        rebuild_proxy_index()
+        # Point the UI handler at the fresh registry too.
+        import open_free_router.ui as ui_mod
+        ui_mod._UIHandler.reg = new_reg
+        self._registry_mtime = self._registry_file_mtime()
+        n = len(new_reg.providers)
+        print(f"[reload] registry reloaded from {self.cfg.registry_path} ({n} providers)")
+        return True
+
+    def _registry_file_mtime(self):
+        try:
+            return self.cfg.registry_path.stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def _registry_watchdog(self, interval_seconds: float = 10.0):
+        """Poll registry.yaml's mtime; reload when it changes. Catches
+        CLI refresh/add/sync writes and manual file edits without needing
+        the signal channel (which only fires for CLI-initiated reloads)."""
+        while not self._stop.wait(interval_seconds):
+            mtime = self._registry_file_mtime()
+            if mtime is not None and self._registry_mtime is not None and mtime != self._registry_mtime:
+                print("[reload] registry.yaml changed on disk — reloading")
+                self._reload_registry()
+
     def serve(self):
         print(f"  Proxy  : {self.cfg.proxy_host}:{self.cfg.proxy_port}")
         print(f"  UI     : http://{self.cfg.ui_host}:{self.cfg.ui_port}")
@@ -99,26 +157,44 @@ class Daemon:
         threads = []
         try:
             # Start proxy
-            srv, _ = run_proxy(self.reg, host=self.cfg.proxy_host, port=self.cfg.proxy_port,
-                               upstream_timeout=self.cfg.upstream_timeout,
-                               tier_cascade=self.cfg.tier_cascade)
+            srv, handler = run_proxy(self.reg, host=self.cfg.proxy_host, port=self.cfg.proxy_port,
+                                     upstream_timeout=self.cfg.upstream_timeout,
+                                     tier_cascade=self.cfg.tier_cascade)
             self._proxy_server = srv
+            self._proxy_handler = handler
+            self._registry_mtime = self._registry_file_mtime()
 
             # Write Pi models on startup
             proxy_url = f"http://{self.cfg.proxy_host}:{self.cfg.proxy_port}/v1"
             write_pi_models(self.reg, proxy_url=proxy_url)
             sync_all(self.reg, proxy_url=proxy_url)
 
+            # SIGUSR1 = "registry changed on disk, reload". Lets the CLI
+            # (open-free-router refresh/add/sync) trigger an immediate
+            # in-process reload after saving registry.yaml, instead of the
+            # user having to restart serve. The handler only flags the
+            # request; the main loop below does the actual (I/O) reload.
+            def _on_sigusr1(signum, frame):
+                self._reload_requested.set()
+
+            if hasattr(signal, "SIGUSR1"):
+                signal.signal(signal.SIGUSR1, _on_sigusr1)
+
             threads = [
                 threading.Thread(target=run_ui, args=(self.cfg, self.cfg.ui_port, self.reg),
                                   kwargs={"scheduler_status": self.scheduler_status}, daemon=True),
                 threading.Thread(target=self._scheduler, daemon=True),
+                threading.Thread(target=self._registry_watchdog, daemon=True),
             ]
 
             for t in threads:
                 t.start()
 
             while not self._stop.is_set():
+                if self._reload_requested.is_set():
+                    self._reload_requested.clear()
+                    print("[reload] SIGUSR1 received — reloading registry")
+                    self._reload_registry()
                 self._stop.wait(1)
         except KeyboardInterrupt:
             self._stop.set()

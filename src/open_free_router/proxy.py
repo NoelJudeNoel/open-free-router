@@ -395,13 +395,21 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         pass
 
 
+# The live handler class created by run_proxy() — rebuild_proxy_index()
+# needs to rebuild THIS class's index (it carries the registry reference),
+# not the base _ProxyHandler which has registry=None.
+_ACTIVE_HANDLER: ClassVar[type | None] = None
+
+
 def run_proxy(registry: Registry, host: str = "127.0.0.1", port: int = 8337, upstream_timeout: int = 120,
              tier_cascade: bool = True):
+    global _ACTIVE_HANDLER
     handler = type("Handler", (_ProxyHandler,), {
         "registry": registry,
         "_upstream_timeout": upstream_timeout,
         "_tier_cascade": tier_cascade,
     })
+    _ACTIVE_HANDLER = handler
     handler.rebuild_index()
     srv = ThreadingHTTPServer((host, port), handler)
     print(f"  Proxy  : {host}:{port} (single-port, model-ID routing)")
@@ -427,5 +435,9 @@ def rebuild_proxy_index():
     reason to leave it unwired now that a fix is this cheap.
     """
     from open_free_router.upstream import reset_tier_state
-    _ProxyHandler.rebuild_index()
+    # Rebuild the index of the LIVE handler class (the one created by
+    # run_proxy with the real registry attached), falling back to the base
+    # class only when no proxy has been started (tests / standalone ui).
+    target = _ACTIVE_HANDLER or _ProxyHandler
+    target.rebuild_index()
     reset_tier_state()

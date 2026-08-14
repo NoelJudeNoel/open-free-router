@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import signal
 import sys
 from pathlib import Path
 from open_free_router.config import Config
@@ -41,6 +43,30 @@ def _ensure_config(cfg: Config):
         }, default_flow_style=False))
 
 
+def _notify_daemon_reload(cfg: Config):
+    """Tell a running serve daemon to reload registry.yaml from disk.
+
+    Reads the daemon PID from the pidfile written by _instance_guard and
+    sends SIGUSR1. Silently no-ops if the daemon isn't running (no pidfile
+    or the process is gone) — the daemon's mtime watchdog picks the change
+    up on its own later anyway.
+    """
+    pidfile = cfg.data_dir / "open-free-router.pid"
+    try:
+        lines = pidfile.read_text().splitlines()
+        pid = None
+        for line in lines:
+            if line.startswith("pid="):
+                pid = int(line.split("=", 1)[1])
+                break
+        if pid is None:
+            return
+        os.kill(pid, signal.SIGUSR1)
+        print(f"  → daemon (pid {pid}) reloading registry")
+    except (OSError, ValueError):
+        pass  # daemon not running / stale pidfile — harmless
+
+
 def cmd_refresh(args):
     cfg = Config()
     _bootstrap_registry(cfg)
@@ -57,6 +83,7 @@ def cmd_refresh(args):
     if changed and not args.dry_run:
         reg.save(cfg.registry_path, git_history=cfg.registry_git_history)
         print("\n✔ registry updated")
+        _notify_daemon_reload(cfg)
     elif not changed:
         print("\n✓ no changes")
 
@@ -106,6 +133,7 @@ def cmd_add(args):
     reg.add_provider(p)
     reg.save(cfg.registry_path, git_history=cfg.registry_git_history)
     print(f"✔ Added provider '{name}' with {len(models)} models")
+    _notify_daemon_reload(cfg)
 
 
 def cmd_setup(args):
