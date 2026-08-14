@@ -144,7 +144,7 @@ open-free-router serve
 你第一次运行会看到类似：
 
 ```
-✔ Created ~/.config/open-free-router/registry.yaml with 9 providers
+✔ Created ~/.config/open-free-router/registry.yaml with 7 providers
   ⚠ No API keys configured yet.
   Run:  open-free-router setup
 
@@ -202,7 +202,7 @@ open-free-router setup
 填完它会提示保存成功，并统计有几个 provider 已有 key：
 
 ```
-✔ Saved ~/.config/open-free-router/registry.yaml — 2/9 providers have keys
+✔ Saved ~/.config/open-free-router/registry.yaml — 2/7 providers have keys
   Run  open-free-router serve  to start.
 ```
 
@@ -401,8 +401,13 @@ journalctl -u open-free-router -f          # 看实时日志
 | 单独开仪表盘 | `open-free-router ui` |
 | 往 registry 加一个 provider | `open-free-router add NAME --base-url URL [--model ID]` |
 | 看代理返回了哪些模型 | `curl http://127.0.0.1:8337/v1/models` |
-| 检查服务健康 | `curl http://127.0.0.1:8337/` |
-| 改刷新间隔（默认 12h） | 编辑 `config.yaml` 的 `refresh_interval_hours` 后重启 |
+| 检查服务健康 | `curl http://127.0.0.1:8337/healthz`（返回 `{"ok": true}` 即正常） |
+| 改刷新间隔（默认 12h） | 编辑 `config.yaml` 的 `refresh_interval_hours` 后重启（此值在 daemon 启动时读取；改完重启才生效） |
+
+> 💡 **改了 registry 不用重启**：运行中的 daemon 会自动热重载（`refresh`/`add` 保存后约 2 秒内生效，
+> 手工编辑文件约 10 秒内生效）。注意热重载只更新模型路由表，**不会**重写 Agent 配置文件。
+> 另外仪表盘的 Config 页签会显示"当前生效配置"（含默认值），比如 `refresh_interval_hours: 12h`、
+> `upstream_timeout: 120s`——即使你没在文件里写这些也能看到实际生效值。
 
 
 ---
@@ -477,7 +482,7 @@ rm -rf ~/.config/open-free-router         # 配置 + registry（含 key）
 
 ### Q7 没看到想用的模型 / 怎样加一个自定义厂商
 
-内置 10 家是"开箱即用"的。如果你有**别家**的支持 OpenAI 兼容 API 的地址，
+内置 7 家（openrouter、nvidia-nim、opencode-zen-free、sensenova、google-ai-studio、nous、poolside）是"开箱即用"的。如果你有**别家**的支持 OpenAI 兼容 API 的地址，
 用 `add` 命令加一个自定义 provider（自定义的不是内置项，`upstream_url` 可自由填）：
 
 ```bash

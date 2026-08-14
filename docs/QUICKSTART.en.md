@@ -138,7 +138,7 @@ This is the most important command. It starts three things at once:
 On first run you'll see something like:
 
 ```
-✔ Created ~/.config/open-free-router/registry.yaml with 9 providers
+✔ Created ~/.config/open-free-router/registry.yaml with 7 providers
   ⚠ No API keys configured yet.
   Run:  open-free-router setup
 
@@ -171,7 +171,7 @@ the proxy is serving the model list. ✅
 Now `serve` is running, but there are no keys yet — the proxy can list models,
 but actual model calls will fail (no credentials to authenticate upstream).
 
-> You don't need keys for all 9 providers. **Fill in only the ones you want to
+> You don't need keys for all 7 providers. **Fill in only the ones you want to
 > use.** Providers without keys are skipped and don't affect the others.
 
 ### Option A: Interactive wizard (recommended)
@@ -195,7 +195,7 @@ where you have one; press Enter to skip the rest.** Example:
 It then reports how many providers now have keys:
 
 ```
-✔ Saved ~/.config/open-free-router/registry.yaml — 2/9 providers have keys
+✔ Saved ~/.config/open-free-router/registry.yaml — 2/7 providers have keys
   Run  open-free-router serve  to start.
 ```
 
@@ -395,8 +395,15 @@ journalctl -u open-free-router -f          # live logs
 | Open just the dashboard | `open-free-router ui` |
 | Add a provider to the registry | `open-free-router add NAME --base-url URL [--model ID]` |
 | See which models the proxy returns | `curl http://127.0.0.1:8337/v1/models` |
-| Health check | `curl http://127.0.0.1:8337/` |
-| Change refresh interval (default 12h) | edit `refresh_interval_hours` in `config.yaml`, restart |
+| Health check | `curl http://127.0.0.1:8337/healthz` (returns `{"ok": true}` when healthy) |
+| Change refresh interval (default 12h) | edit `refresh_interval_hours` in `config.yaml`, restart (read at daemon start) |
+
+> 💡 **No restart needed after registry edits**: the running daemon hot-reloads
+> automatically (~2s after `refresh`/`add` saves, ~10s after manual file edits).
+> Hot reload only refreshes the model routing tables — it does **not** rewrite agent
+> config files. The dashboard's Config tab also shows the **effective config incl.
+> defaults** (e.g. `refresh_interval_hours: 12h`, `upstream_timeout: 120s`) even
+> when those keys aren't written in the file.
 
 
 ---
@@ -475,7 +482,7 @@ rm -rf ~/.config/open-free-router         # config + registry (contains keys)
 
 ### Q7 Missing model / how to add a custom vendor
 
-The 10 built-in providers work out of the box. If you have **another** vendor
+The 7 built-in providers (openrouter, nvidia-nim, opencode-zen-free, sensenova, google-ai-studio, nous, poolside) work out of the box. If you have **another** vendor
 with an OpenAI-compatible API, add a custom provider (`upstream_url` is free-form
 for non-built-ins):
 
