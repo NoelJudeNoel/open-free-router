@@ -103,7 +103,8 @@ class Daemon:
         try:
             # Start proxy
             srv, _ = run_proxy(self.reg, host=self.cfg.proxy_host, port=self.cfg.proxy_port,
-                               upstream_timeout=self.cfg.upstream_timeout)
+                               upstream_timeout=self.cfg.upstream_timeout,
+                               tier_cascade=self.cfg.tier_cascade)
             self._proxy_server = srv
 
             # Write Pi models on startup

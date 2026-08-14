@@ -288,7 +288,7 @@ class TierStreamResult:
 
 def forward_tier_buffered(tier: str, registry, req: dict[str, Any],
                           timeout: int, *, num_retries: int = DEFAULT_NUM_RETRIES,
-                          request_context: int = 0
+                          request_context: int = 0, cascade: bool = True
                           ) -> tuple[int, bytes, dict[str, str], UpstreamInstance | None]:
     """Route a non-streaming request through `tier` with ordered fallback.
 
@@ -305,8 +305,16 @@ def forward_tier_buffered(tier: str, registry, req: dict[str, Any],
     concrete snapshot, so this matches what clients already expect rather
     than inventing new behavior they'd need to know to look for.
     """
-    from open_free_router.tiers import tier_members
-    pool = tier_members(tier, registry, request_context=request_context)
+    from open_free_router.tiers import tier_members, tier_cascade_pool
+    primary_pool = tier_members(tier, registry, request_context=request_context)
+    primary_keys = {i.key for i in primary_pool}
+    if cascade:
+        # Cross-tier cascade: when the requested tier can't serve, spill
+        # into lower tiers (high->mid->low) for the SAME request so a
+        # fully rate-limited tier never surfaces a 429 to the client.
+        pool = tier_cascade_pool(tier, registry, request_context=request_context)
+    else:
+        pool = primary_pool
     if not pool:
         raise TierExhaustedError(tier)
 
@@ -334,6 +342,9 @@ def forward_tier_buffered(tier: str, registry, req: dict[str, Any],
                 if status < 400:
                     _router.stats.record_success(inst.key)
                     body = _rewrite_model_field(body, inst.key)
+                    if cascade and inst.key not in primary_keys:
+                        print(f"[tier] '{tier}' request served by cascade instance "
+                              f"{inst.key} (requested tier exhausted / cooling down)")
                     return status, body, hdrs, inst
                 last_status = status
                 _router.stats.record_failure(inst.key)
@@ -375,7 +386,7 @@ def _rewrite_model_field(body: bytes, instance_key: str) -> bytes:
 
 def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
                            timeout: int, *, num_retries: int = DEFAULT_NUM_RETRIES,
-                           request_context: int = 0):
+                           request_context: int = 0, cascade: bool = True):
     """Try instances in `tier` until one begins streaming without error.
 
     Returns (TierStreamResult, UpstreamInstance) on success -- streaming
@@ -390,8 +401,16 @@ def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
     inconsistent with (and strictly less useful than) the buffered
     path's error for the same failure mode.
     """
-    from open_free_router.tiers import tier_members
-    pool = tier_members(tier, registry, request_context=request_context)
+    from open_free_router.tiers import tier_members, tier_cascade_pool
+    primary_pool = tier_members(tier, registry, request_context=request_context)
+    primary_keys = {i.key for i in primary_pool}
+    if cascade:
+        # Cross-tier cascade: when the requested tier can't serve, spill
+        # into lower tiers (high->mid->low) for the SAME request so a
+        # fully rate-limited tier never surfaces a 429 to the client.
+        pool = tier_cascade_pool(tier, registry, request_context=request_context)
+    else:
+        pool = primary_pool
     if not pool:
         raise TierExhaustedError(tier)
 
@@ -430,6 +449,9 @@ def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
                 break  # -> next instance in `for inst in pool`
             client_hdrs = {k.lower(): v for k, v in resp.getheaders()}
             _router.stats.record_success(inst.key)
+            if cascade and inst.key not in primary_keys:
+                print(f"[tier] '{tier}' stream served by cascade instance "
+                      f"{inst.key} (requested tier exhausted / cooling down)")
             # Model field intentionally NOT rewritten here, unlike the
             # buffered path: doing so would mean parsing and re-serializing
             # every SSE chunk instead of the current low-overhead

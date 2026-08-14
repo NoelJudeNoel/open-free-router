@@ -47,6 +47,20 @@ TIERS: dict[str, list[str]] = {
 # Tier ids exposed to agents (the virtual model names)
 TIER_IDS = ("tier/high", "tier/mid", "tier/low")
 
+# Cross-tier cascade: when a requested tier can't serve (every instance
+# failed or is in cooldown), spill into the next-lower tier(s) for the
+# SAME request, picking fresh instances. Strictly downward only -- a
+# `tier/low` request never escalates to `tier/high` -- so the user's
+# tier choice is always respected as a *ceiling*, and we only ever fall
+# back to something weaker/cheaper, never stronger. The requested tier
+# is always first in each list so its preferred instances are tried
+# before any lower-tier instance is reached.
+_TIER_CASCADE: dict[str, list[str]] = {
+    "high": ["high", "mid", "low"],
+    "mid": ["mid", "low"],
+    "low": ["low"],
+}
+
 # Sensible fallback ordering within a tier: we want the most-capable /
 # widest-context instance first so the user lands on the best available.
 #
@@ -177,6 +191,36 @@ def tier_members(tier: str, registry: Registry, request_context: int = 0) -> lis
     # nvidia-nim/glm-5.2 128k).
     pool.sort(key=lambda t: (t[0], -t[1].context_window))
     return [inst for _, inst in pool]
+
+
+def tier_cascade_pool(tier: str, registry: Registry, request_context: int = 0) -> list[UpstreamInstance]:
+    """Ordered candidate pool for `tier`, cascading down into lower tiers
+    when the requested tier alone can't serve.
+
+    The cascade rank is the primary sort key, so the requested tier's
+    instances (already ordered by priority then context_window inside
+    tier_members()) are always tried first; only when all of them fail
+    or are cooling down do we reach the next tier down. Instances are
+    de-duplicated by key so the same (provider, model) deployment is
+    never attempted twice within one request.
+
+    This is what makes free-model rate-limit/quota exhaustion invisible
+    to the calling application: a `tier/high` request that would
+    otherwise 429 because every high-tier instance is rate-limited is
+    transparently served by a mid/low instance instead, with the client
+    receiving a normal 200 (and, on the buffered path, a rewritten
+    `model` field naming the instance that actually answered).
+    """
+    tiers_to_try = _TIER_CASCADE.get(tier, [tier])
+    seen: set[str] = set()
+    combined: list[UpstreamInstance] = []
+    for t in tiers_to_try:
+        for inst in tier_members(t, registry, request_context=request_context):
+            if inst.key in seen:
+                continue
+            seen.add(inst.key)
+            combined.append(inst)
+    return combined
 
 
 def is_tier_id(model: str) -> bool:

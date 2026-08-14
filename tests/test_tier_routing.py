@@ -10,7 +10,7 @@ import yaml
 
 from open_free_router.registry import Registry, ModelInfo, ProviderConfig
 from open_free_router.tiers import (
-    TIERS, TIER_IDS, is_tier_id, tier_members, UpstreamInstance,
+    TIERS, TIER_IDS, is_tier_id, tier_members, tier_cascade_pool, UpstreamInstance,
 )
 from open_free_router.upstream import (
     TierExhaustedError, TierStreamResult, reset_tier_state, _router,
@@ -683,3 +683,85 @@ def test_rewrite_model_field_falls_back_on_unparseable_body():
     from open_free_router.upstream import _rewrite_model_field
     garbage = b"not json at all"
     assert _rewrite_model_field(garbage, "sensenova/glm-5.2") == garbage
+
+
+# ── Cross-tier cascade failover (the fix for "free quota exhausted -> app
+# must manually switch + resend 'continue'") ──
+
+def test_tier_cascade_pool_orders_requested_tier_first():
+    """The requested tier's instances must all appear in the cascade pool
+    and come before any lower-tier instance -- cascade is a fallback,
+    never an escalation, so a tier/high request still prefers high
+    instances whenever any are available."""
+    reg = Registry(yaml.safe_load(DEFAULT_YAML.read_text()))
+    high = tier_members("high", reg)
+    cascade = tier_cascade_pool("high", reg)
+    high_keys = [i.key for i in high]
+    cascade_keys = [i.key for i in cascade]
+    assert high_keys == cascade_keys[:len(high_keys)]
+    for k in high_keys:
+        assert k in cascade_keys
+    mid_low = [k for k in cascade_keys if k not in set(high_keys)]
+    if mid_low:
+        assert cascade_keys.index(mid_low[0]) >= len(high_keys)
+
+
+def test_forward_buffered_cascades_to_lower_tier():
+    """When every instance of the requested tier rate-limits (429), the
+    same request must be transparently served by a lower-tier instance
+    instead of raising TierExhaustedError -- the app gets a normal 200
+    and never sees the rate-limit error."""
+    reg = Registry(yaml.safe_load(DEFAULT_YAML.read_text()))
+    high_keys = {i.key for i in tier_members("high", reg)}
+
+    def fake_connect(inst, path, data, headers, timeout):
+        if inst.key in high_keys:
+            return (_FakeResp(429, retry_after="0"), MagicMock())
+        return (_FakeResp(200, b'{"ok":true,"model":"tier/high"}'), MagicMock())
+
+    with patch("open_free_router.upstream._connect", side_effect=fake_connect):
+        status, body, hdrs, inst = forward_tier_buffered(
+            "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"}, 5)
+    assert status == 200
+    assert inst.key not in high_keys
+    parsed = json.loads(body)
+    assert parsed["model"] == inst.key
+
+
+def test_forward_streaming_cascades_to_lower_tier():
+    """Streaming variant: a tier/high request whose high-tier instances
+    all 429 must still begin streaming from a lower-tier instance (the
+    switch happens before the first byte, so the client is unaware)."""
+    reg = Registry(yaml.safe_load(DEFAULT_YAML.read_text()))
+    high_keys = {i.key for i in tier_members("high", reg)}
+
+    def fake_connect(inst, path, data, headers, timeout):
+        if inst.key in high_keys:
+            return (_FakeResp(429, retry_after="0"), MagicMock())
+        return (_FakeResp(200, b""), MagicMock())
+
+    with patch("open_free_router.upstream._connect", side_effect=fake_connect):
+        res, inst = forward_tier_streaming(
+            "high", reg,
+            {"model": "tier/high", "_endpoint_path": "chat/completions", "stream": True}, 5)
+    assert res.status == 200
+    assert inst.key not in high_keys
+
+
+def test_forward_buffered_no_cascade_stops_at_requested_tier():
+    """With cascade disabled, a fully rate-limited requested tier must NOT
+    spill into lower tiers -- it should exhaust and raise, preserving the
+    opt-out semantics for callers that want strict single-tier behavior."""
+    reg = Registry(yaml.safe_load(DEFAULT_YAML.read_text()))
+    high_keys = {i.key for i in tier_members("high", reg)}
+
+    def fake_connect(inst, path, data, headers, timeout):
+        if inst.key in high_keys:
+            return (_FakeResp(429, retry_after="0"), MagicMock())
+        return (_FakeResp(200, b"{}"), MagicMock())
+
+    with patch("open_free_router.upstream._connect", side_effect=fake_connect):
+        with pytest.raises(TierExhaustedError):
+            forward_tier_buffered(
+                "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"},
+                5, cascade=False)

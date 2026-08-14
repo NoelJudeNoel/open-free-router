@@ -94,6 +94,12 @@ refresh_interval_hours: 12
 # 等于给"每一个用过的 key"建立一份永久本地历史，这是一个值得你主动决定的
 # 行为变化，而不是默认帮你做。
 registry_git_history: false
+
+# 可选，默认 true。tier/high|mid|low 路由在「整档层级都被限流/额度耗尽」
+# 时，自动向下一层级（high→mid→low）无缝切换候选模型与供应商，
+# 同一个请求直接由可用实例兜底返回 200，应用侧完全无感（无需手动切模型、
+# 重发「继续」）。设为 false 则严格只在请求所在的单一层级内 failover。
+tier_cascade: true
 ```
 
 首次运行 `serve` 自动创建配置文件和注册表，无需手动初始化。

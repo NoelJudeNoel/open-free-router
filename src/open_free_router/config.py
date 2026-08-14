@@ -47,6 +47,11 @@ class Config:
         # proxy upstream timeout
         self.upstream_timeout = int(self._raw.get("upstream_timeout", 120))
 
+        # Cross-tier cascade failover: when a requested tier (high/mid/low)
+        # is fully rate-limited / quota-exhausted, spill into lower tiers
+        # for the same request so the app never sees a 429. On by default.
+        self.tier_cascade = bool(self._raw.get("tier_cascade", True))
+
         # ui
         self.ui_host = self._raw.get("ui", {}).get("host", "127.0.0.1")
         self.ui_port = int(self._raw.get("ui", {}).get("port", 9057))

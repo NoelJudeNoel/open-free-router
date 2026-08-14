@@ -197,6 +197,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             if is_tier_id(model_id):
                 tier = model_id.split("/", 1)[1]
                 timeout = getattr(self, "_upstream_timeout", 120)
+                cascade = getattr(self, "_tier_cascade", True)
                 ctx_len = _request_context_len(req)
                 req["_endpoint_path"] = endpoint_suffix
                 is_stream = endpoint_suffix != "embeddings" and bool(req.get("stream"))
@@ -204,7 +205,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 if is_stream:
                     try:
                         res, inst = forward_tier_streaming(
-                            tier, self.registry, req, timeout, request_context=ctx_len)
+                            tier, self.registry, req, timeout, request_context=ctx_len,
+                            cascade=cascade)
                     except TierExhaustedError as e:
                         _tier_exhausted(tier, e.last_status)
                         return
@@ -234,7 +236,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 # buffered tier path
                 try:
                     status, body, hdrs, inst = forward_tier_buffered(
-                        tier, self.registry, req, timeout, request_context=ctx_len)
+                        tier, self.registry, req, timeout, request_context=ctx_len,
+                        cascade=cascade)
                     self.send_response(status)
                     self.send_header("Content-Type",
                                      hdrs.get("content-type", "application/json"))
@@ -393,10 +396,12 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         pass
 
 
-def run_proxy(registry: Registry, host: str = "127.0.0.1", port: int = 8337, upstream_timeout: int = 120):
+def run_proxy(registry: Registry, host: str = "127.0.0.1", port: int = 8337, upstream_timeout: int = 120,
+             tier_cascade: bool = True):
     handler = type("Handler", (_ProxyHandler,), {
         "registry": registry,
         "_upstream_timeout": upstream_timeout,
+        "_tier_cascade": tier_cascade,
     })
     handler.rebuild_index()
     srv = ThreadingHTTPServer((host, port), handler)
