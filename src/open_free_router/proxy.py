@@ -11,6 +11,7 @@ import http.client
 import json
 import socket
 import threading
+import uuid
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import ClassVar
 from urllib.parse import urlsplit
@@ -72,6 +73,20 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self.send_header("Retry-After", retry_after)
         self.end_headers()
         self.wfile.write(body)
+
+    @staticmethod
+    def _inject_ofr_body(body: bytes, ofr: dict) -> bytes:
+        """Best-effort: add the opt-in x_ofr debug field to a JSON
+        2xx response body. Never raises (mirrors _rewrite_model_field's
+        fail-safe): an unparseable body just passes through unchanged."""
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict):
+                parsed["x_ofr"] = ofr
+                return json.dumps(parsed).encode()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        return body
 
     def do_GET(self):
         from urllib.parse import urlparse
@@ -204,16 +219,61 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             from open_free_router.tiers import is_tier_id
             from open_free_router.upstream import (
                 forward_tier_buffered, forward_tier_streaming,
-                TierExhaustedError, _request_context_len,
+                TierExhaustedError, TierTrace, _request_context_len,
             )
 
-            def _tier_exhausted(tier, last_status=None):
-                self._send_json(429, {"error": {
-                    "message": (f"tier '{tier}' exhausted — all free upstream "
-                                f"instances failed (last HTTP {last_status})."),
+            req_headers = getattr(self, "headers", None)
+            debug_body = bool(
+                req_headers and req_headers.get("X-OFR-Debug", "").strip().lower() == "true"
+            )
+
+            def _set_ofr_headers(trace: TierTrace | None) -> None:
+                """Surface the per-request failover trail as response
+                headers (T0 of the observability design). Zero body
+                impact, works for both buffered and streaming (headers
+                are sent before the first SSE byte), always on."""
+                if not trace:
+                    return
+                self.send_header("X-OFR-Trace", trace.trace_id)
+                self.send_header("X-OFR-Tier", trace.tier)
+                if trace.served_by:
+                    self.send_header("X-OFR-Served-By", trace.served_by)
+                if trace.attempts:
+                    self.send_header("X-OFR-Attempts", str(len(trace.attempts)))
+                if trace.filtered_keys:
+                    self.send_header("X-OFR-Filtered", str(len(trace.filtered_keys)))
+                if len(trace.cascade_path) > 1:
+                    self.send_header("X-OFR-Cascade", "->".join(trace.cascade_path))
+                if trace.cooldowns_set:
+                    self.send_header("X-OFR-Cooldown-Set", ",".join(trace.cooldowns_set))
+                if trace.request_context:
+                    self.send_header("X-OFR-Request-Context", str(trace.request_context))
+
+            def _ofr_body(trace: TierTrace) -> dict:
+                """T2 body enrichment: full per-request trail, opt-in via
+                X-OFR-Debug: true (non-streaming responses only)."""
+                return {
+                    "trace_id": trace.trace_id,
+                    "requested": model_id,
+                    "tier": trace.tier,
+                    "request_context": trace.request_context,
+                    "cascade_path": trace.cascade_path,
+                    "served_by": trace.served_by,
+                    "filtered_keys": trace.filtered_keys,
+                    "cooldowns_set": trace.cooldowns_set,
+                    "attempts": trace.attempts,
+                }
+
+            def _tier_exhausted(trace: TierTrace | None, last_status=None):
+                error: dict = {
+                    "message": (f"tier '{trace.tier if trace else '?'}' exhausted — "
+                                f"all free upstream instances failed (last HTTP {last_status})."),
                     "type": "proxy_error",
-                    "tier": tier,
-                }})
+                    "tier": trace.tier if trace else None,
+                }
+                if trace:
+                    error["x_ofr"] = _ofr_body(trace)
+                self._send_json(429, {"error": error})
                 return True  # signal: request handled
 
             if is_tier_id(model_id):
@@ -221,6 +281,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 timeout = getattr(self, "_upstream_timeout", 120)
                 cascade = getattr(self, "_tier_cascade", True)
                 ctx_len = _request_context_len(req)
+                trace = TierTrace(trace_id=uuid.uuid4().hex[:12], tier=tier,
+                                  request_context=ctx_len, cascade=cascade)
                 req["_endpoint_path"] = endpoint_suffix
                 is_stream = endpoint_suffix != "embeddings" and bool(req.get("stream"))
 
@@ -228,19 +290,16 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     try:
                         res, inst = forward_tier_streaming(
                             tier, self.registry, req, timeout, request_context=ctx_len,
-                            cascade=cascade)
+                            cascade=cascade, trace=trace)
                     except TierExhaustedError as e:
-                        _tier_exhausted(tier, e.last_status)
+                        _tier_exhausted(trace, e.last_status)
                         return
-                    # forward_tier_streaming() only returns via its success
-                    # path (status < 400) or raises TierExhaustedError --
-                    # it can never return a >=400 status, so there is no
-                    # error-status branch to handle here.
                     self.send_response(res.status)
                     self.send_header("Content-Type",
                                      res.headers.get("content-type", "text/event-stream"))
                     self.send_header("Cache-Control", "no-cache" if is_stream else "no-store")
                     self.send_header("Transfer-Encoding", "chunked")
+                    _set_ofr_headers(trace)
                     self.end_headers()
                     while True:
                         line = res.response.readline()
@@ -259,16 +318,19 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 try:
                     status, body, hdrs, inst = forward_tier_buffered(
                         tier, self.registry, req, timeout, request_context=ctx_len,
-                        cascade=cascade)
+                        cascade=cascade, trace=trace)
+                    if debug_body and status < 400:
+                        body = self._inject_ofr_body(body, _ofr_body(trace))
                     self.send_response(status)
                     self.send_header("Content-Type",
                                      hdrs.get("content-type", "application/json"))
                     self.send_header("Content-Length", str(len(body)))
+                    _set_ofr_headers(trace)
                     self.end_headers()
                     self.wfile.write(body)
                     return
                 except TierExhaustedError as e:
-                    _tier_exhausted(tier, e.last_status)
+                    _tier_exhausted(trace, e.last_status)
                     return
             self._send_json(403, {"error": {
                 "message": f"Model '{model_id}' not in free whitelist.",

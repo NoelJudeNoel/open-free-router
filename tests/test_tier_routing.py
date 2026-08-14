@@ -730,7 +730,7 @@ def test_cooldown_event_is_logged(capsys):
                 "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"},
                 5, num_retries=0)
     out = capsys.readouterr().out
-    assert "[tier]" in out
+    assert "[tier:-]" in out
     assert inst.key in out
     assert "cooling down" in out
 
@@ -839,3 +839,103 @@ def test_forward_buffered_no_cascade_stops_at_requested_tier():
             forward_tier_buffered(
                 "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"},
                 5, cascade=False)
+
+# ── Tier observability: TierTrace per-request trail (T0/T1/T2 design) ──
+
+def test_trace_records_successful_request():
+    """A successful tier request records ok attempt + served_by."""
+    from open_free_router.upstream import TierTrace
+    reg = Registry(yaml.safe_load(DEFAULT_YAML.read_text()))
+    trace = TierTrace(trace_id="abc123", tier="high", request_context=1000)
+    with patch("open_free_router.upstream._connect",
+               return_value=(_FakeResp(200, b"{}"), MagicMock())):
+        forward_tier_buffered("high", reg,
+                              {"model": "tier/high", "_endpoint_path": "chat/completions"},
+                              5, trace=trace)
+    assert trace.served_by is not None
+    assert len(trace.attempts) == 1
+    assert trace.attempts[0]["outcome"] == "ok"
+    assert trace.attempts[0]["status"] == 200
+
+
+def test_trace_records_failover_and_cooldown():
+    """Facade fails -> cooldown set + next instance tried, all in trail."""
+    from open_free_router.upstream import TierTrace
+    reg = Registry(yaml.safe_load(DEFAULT_YAML.read_text()))
+    high_keys = {i.key for i in tier_members("high", reg)}
+    trace = TierTrace(trace_id="f002", tier="high")
+
+    def fake_connect(inst, path, data, headers, timeout):
+        if inst.key in high_keys:
+            return (_FakeResp(429, retry_after="41"), MagicMock())
+        return (_FakeResp(200, b"{}"), MagicMock())
+
+    with patch("open_free_router.upstream._connect", side_effect=fake_connect):
+        status, body, hdrs, inst = forward_tier_buffered(
+            "high", reg, {"model": "tier/high", "_endpoint_path": "chat/completions"},
+            5, num_retries=0, trace=trace)
+    assert status == 200
+    # the failed high instance was recorded as error + marked cooldown
+    failed_keys = [a["instance"] for a in trace.attempts if a["outcome"] == "error"]
+    assert any(k in high_keys for k in failed_keys)
+    assert any(a["retry_after"] == 41 for a in trace.attempts)
+    assert trace.cooldowns_set, "failed instance should be in cooldowns_set"
+    assert trace.served_by == inst.key
+
+
+def test_trace_records_cascade_path_and_filtered():
+    """Cascade path populated; context-window-filtered instances listed."""
+    from open_free_router.upstream import TierTrace
+    reg = Registry(yaml.safe_load(DEFAULT_YAML.read_text()))
+    trace = TierTrace(trace_id="c009", tier="high", cascade=True)
+    # absurd request_context filters every instance in every tier; the
+    # pool would be empty -> exhaust, but the trail still records all
+    # filtered entries via tier_filtered_instances
+    with patch("open_free_router.upstream._connect",
+               return_value=(_FakeResp(200, b"{}"), MagicMock())):
+        with pytest.raises(TierExhaustedError) as ei:
+            forward_tier_buffered(
+                "high", reg,
+                {"model": "tier/high", "_endpoint_path": "chat/completions"},
+                5, request_context=10**15, trace=trace)
+    assert trace.cascade_path == ["high", "mid", "low"]
+    assert trace.filtered_keys, "expect context-window filtering recorded"
+    assert all(a["outcome"] == "filtered" for a in trace.attempts)
+    assert ei.value.trace is trace
+
+
+def test_trace_records_streaming_success():
+    from open_free_router.upstream import TierTrace
+    reg = Registry(yaml.safe_load(DEFAULT_YAML.read_text()))
+    trace = TierTrace(trace_id="s123", tier="high")
+    with patch("open_free_router.upstream._connect",
+               return_value=(_FakeResp(200, b""), MagicMock())):
+        res, inst = forward_tier_streaming(
+            "high", reg,
+            {"model": "tier/high", "_endpoint_path": "chat/completions", "stream": True},
+            5, trace=trace)
+    assert res.status == 200
+    assert trace.served_by == inst.key
+    assert trace.attempts[-1]["outcome"] == "ok"
+
+
+def test_trace_attached_to_exhaustion_error():
+    from open_free_router.upstream import TierTrace
+    reg = Registry(yaml.safe_load(DEFAULT_YAML.read_text()))
+    high_keys = {i.key for i in tier_members("high", reg)}
+    trace = TierTrace(trace_id="e777", tier="high")
+
+    def fake_connect(inst, path, data, headers, timeout):
+        return (_FakeResp(500, b"{}"), MagicMock())
+
+    with patch("open_free_router.upstream._connect", side_effect=fake_connect):
+        with pytest.raises(TierExhaustedError) as ei:
+            forward_tier_buffered("high", reg,
+                                  {"model": "tier/high", "_endpoint_path": "chat/completions"},
+                                  5, num_retries=0, cascade=False, trace=trace)
+    assert ei.value.trace is trace
+    assert all(a["outcome"] == "error" for a in trace.attempts)
+    assert ei.value.last_status == 500
+    # every high instance should have been attempted and cooled down
+    assert len(trace.cooldowns_set) == len(high_keys)
+

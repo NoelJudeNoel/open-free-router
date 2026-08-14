@@ -24,6 +24,7 @@ import json
 import socket
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -33,12 +34,51 @@ DEFAULT_NUM_RETRIES = 1
 DEFAULT_COOLDOWN = 60
 
 
+@dataclass
+class TierTrace:
+    """Per-request failover trail, filled by forward_tier_* as it tries
+    instances. The proxy reads this to inject X-OFR-* response headers
+    and the opt-in `x_ofr` body field, so applications can see *what
+    happened inside a tier/* request* — which instances were filtered by
+    context-window, which failed (and why), which were cooled down, and
+    which ultimately served — not just the final `model` field.
+
+    This is the "open the black box" layer on top of the existing three
+    observability channels (model-field rewrite, /api/status aggregate,
+    [tier] log lines): those tell you *what the proxy decided*, this
+    tells the *calling application* what happened *for this request*.
+    """
+    trace_id: str
+    tier: str
+    request_context: int = 0
+    cascade: bool = True
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    filtered_keys: list[str] = field(default_factory=list)
+    cascade_path: list[str] = field(default_factory=list)
+    cooldowns_set: list[str] = field(default_factory=list)
+    served_by: str | None = None
+
+    def add_attempt(self, instance: str, outcome: str, *,
+                    status: int | None = None, retry_after: int | None = None,
+                    reason: str | None = None, ms: float = 0.0) -> None:
+        self.attempts.append({
+            "instance": instance,
+            "outcome": outcome,
+            "status": status,
+            "retry_after": retry_after,
+            "reason": reason,
+            "ms": round(ms, 1),
+        })
+
+
 class TierExhaustedError(Exception):
     """Raised when every instance in a tier pool failed for one request."""
 
-    def __init__(self, tier: str, last_status: int | None = None):
+    def __init__(self, tier: str, last_status: int | None = None,
+                 trace: TierTrace | None = None):
         self.tier = tier
         self.last_status = last_status
+        self.trace = trace
         super().__init__(f"tier '{tier}' exhausted (last_status={last_status})")
 
 
@@ -301,83 +341,111 @@ class TierStreamResult:
 
 def forward_tier_buffered(tier: str, registry, req: dict[str, Any],
                           timeout: int, *, num_retries: int = DEFAULT_NUM_RETRIES,
-                          request_context: int = 0, cascade: bool = True
+                          request_context: int = 0, cascade: bool = True,
+                          trace: TierTrace | None = None,
                           ) -> tuple[int, bytes, dict[str, str], UpstreamInstance | None]:
-    """Route a non-streaming request through `tier` with ordered fallback.
+    """Route a non-streaming request through a tier with ordered fallback.
 
     context pre-filter -> per-instance retry (num_retries) -> cooldown-skip
     -> failover -> TierExhaustedError on full failure. Caller maps the
     error to a 429 response.
 
-    Returns (status, body, headers, inst) -- inst is the UpstreamInstance
-    that actually served the request, so callers can tell the agent which
-    real provider/model handled a tier/* request (observability layer 1).
-    On success, `body`'s "model" field is also rewritten from the tier
-    alias (e.g. "tier/high") to inst.key (e.g. "sensenova/glm-5.2") --
-    OpenAI's own API does the same thing for alias models resolving to a
-    concrete snapshot, so this matches what clients already expect rather
-    than inventing new behavior they'd need to know to look for.
+    Returns (status, body, headers, inst). If trace is provided, the
+    full attempt trail is recorded into it (filtered/failed/cooldown/
+    served instances) so the proxy can surface per-request observability
+    via X-OFR-* headers / opt-in body.
     """
-    from open_free_router.tiers import tier_members, tier_cascade_pool
+    from open_free_router.tiers import (
+        tier_members, tier_cascade_pool, tier_filtered_instances, _TIER_CASCADE,
+    )
     primary_pool = tier_members(tier, registry, request_context=request_context)
     primary_keys = {i.key for i in primary_pool}
     if cascade:
-        # Cross-tier cascade: when the requested tier can't serve, spill
-        # into lower tiers (high->mid->low) for the SAME request so a
-        # fully rate-limited tier never surfaces a 429 to the client.
         pool = tier_cascade_pool(tier, registry, request_context=request_context)
     else:
         pool = primary_pool
+    if trace:
+        trace.request_context = request_context
+        trace.cascade_path = list(_TIER_CASCADE.get(tier, [tier])) if cascade else [tier]
+        seen_filt: set[str] = set()
+        for t_name in trace.cascade_path:
+            for inst in tier_filtered_instances(t_name, registry, request_context):
+                if inst.key not in seen_filt:
+                    seen_filt.add(inst.key)
+                    trace.filtered_keys.append(inst.key)
+                    trace.add_attempt(inst.key, "filtered",
+                                      reason=f"context_window {inst.context_window} < {request_context}")
     if not pool:
-        raise TierExhaustedError(tier)
+        raise TierExhaustedError(tier, trace=trace)
 
+    tid = trace.trace_id if trace else "-"
     path = _endpoint_path(req)
     original_headers: dict[str, Any] = req.get("_headers", {}) or {}
     last_status: int | None = None
 
     for inst in pool:
         if _router.cooldowns.in_cooldown(inst.key):
+            if trace:
+                trace.add_attempt(inst.key, "cooldown_skip",
+                                  reason="instance in cooldown")
             continue
         headers = _build_headers(inst, original_headers)
         attempt = 0
         while attempt <= num_retries:
             data = json.dumps(_patch_model(req, inst)).encode()
+            t0 = time.monotonic()
             try:
                 resp, conn = _connect(inst, path, data, headers, timeout)
-            except Exception:
+            except Exception as exc:
+                ms = (time.monotonic() - t0) * 1000
+                if trace:
+                    trace.add_attempt(inst.key, "error",
+                                      reason=f"connect: {type(exc).__name__}", ms=ms)
                 attempt += 1
                 continue
             try:
                 status = resp.status
                 body = resp.read()
+                ms = (time.monotonic() - t0) * 1000
                 retry_after = resp.getheader("Retry-After")
                 hdrs = {k.lower(): v for k, v in resp.getheaders()}
                 if status < 400:
                     _router.stats.record_success(inst.key)
                     body = _rewrite_model_field(body, inst.key)
+                    if trace:
+                        trace.served_by = inst.key
+                        trace.add_attempt(inst.key, "ok", status=status, ms=ms)
                     if cascade and inst.key not in primary_keys:
-                        print(f"[tier] '{tier}' request served by cascade instance "
+                        print(f"[tier:{tid}] '{tier}' request served by cascade instance "
                               f"{inst.key} (requested tier exhausted / cooling down)")
                     return status, body, hdrs, inst
                 last_status = status
                 _router.stats.record_failure(inst.key)
+                if trace:
+                    trace.add_attempt(inst.key, "error", status=status,
+                                      retry_after=int(retry_after) if retry_after else None,
+                                      ms=ms)
                 if retry_after and _is_retryable_status(status):
                     _router.cooldowns.mark(inst.key, retry_after)
-                    print(f"[tier] {inst.key} -> HTTP {status}, cooling down "
+                    if trace:
+                        trace.cooldowns_set.append(inst.key)
+                    print(f"[tier:{tid}] {inst.key} -> HTTP {status}, cooling down "
                           f"(retry_after={retry_after}s); trying next instance in '{tier}'")
                     break
                 if _is_retryable_status(status) and attempt < num_retries:
                     attempt += 1
                     continue
                 _router.cooldowns.mark(inst.key, retry_after)
-                print(f"[tier] {inst.key} -> HTTP {status}, cooling down "
+                if trace:
+                    trace.cooldowns_set.append(inst.key)
+                print(f"[tier:{tid}] {inst.key} -> HTTP {status}, cooling down "
                       f"(default {DEFAULT_COOLDOWN}s); trying next instance in '{tier}'")
                 break
             finally:
                 conn.close()
-    print(f"[tier] '{tier}' exhausted -- every instance in the pool failed "
+    print(f"[tier:{tid}] '{tier}' exhausted -- every instance in the pool failed "
           f"(last HTTP {last_status})")
-    raise TierExhaustedError(tier, last_status)
+    raise TierExhaustedError(tier, last_status, trace=trace)
 
 
 def _rewrite_model_field(body: bytes, instance_key: str) -> bytes:
@@ -399,84 +467,94 @@ def _rewrite_model_field(body: bytes, instance_key: str) -> bytes:
 
 def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
                            timeout: int, *, num_retries: int = DEFAULT_NUM_RETRIES,
-                           request_context: int = 0, cascade: bool = True):
-    """Try instances in `tier` until one begins streaming without error.
+                           request_context: int = 0, cascade: bool = True,
+                           trace: TierTrace | None = None):
+    """Try instances in a tier until one begins streaming without error.
 
-    Returns (TierStreamResult, UpstreamInstance) on success -- streaming
-    started; drain result.response, then close result.raw_conn when done.
-
-    Raises TierExhaustedError(tier, last_status) when every instance in
-    the pool failed (or the pool was empty to begin with), mirroring
-    forward_tier_buffered()'s contract. Previously this returned a bare
-    None on exhaustion with no status info, so proxy.py's error message
-    for a streaming-exhausted tier always said "last HTTP None" even
-    when every instance had in fact failed with a real status code --
-    inconsistent with (and strictly less useful than) the buffered
-    path's error for the same failure mode.
+    Returns (TierStreamResult, UpstreamInstance) on success. Raises
+    TierExhaustedError when every instance failed. If trace is provided,
+    the attempt trail is recorded into it (same shape as the buffered
+    path) so the proxy can surface X-OFR-* headers on streaming responses
+    too (headers are sent before the first SSE byte).
     """
-    from open_free_router.tiers import tier_members, tier_cascade_pool
+    from open_free_router.tiers import (
+        tier_members, tier_cascade_pool, tier_filtered_instances, _TIER_CASCADE,
+    )
     primary_pool = tier_members(tier, registry, request_context=request_context)
     primary_keys = {i.key for i in primary_pool}
     if cascade:
-        # Cross-tier cascade: when the requested tier can't serve, spill
-        # into lower tiers (high->mid->low) for the SAME request so a
-        # fully rate-limited tier never surfaces a 429 to the client.
         pool = tier_cascade_pool(tier, registry, request_context=request_context)
     else:
         pool = primary_pool
+    if trace:
+        trace.request_context = request_context
+        trace.cascade_path = list(_TIER_CASCADE.get(tier, [tier])) if cascade else [tier]
+        seen_filt: set[str] = set()
+        for t_name in trace.cascade_path:
+            for inst in tier_filtered_instances(t_name, registry, request_context):
+                if inst.key not in seen_filt:
+                    seen_filt.add(inst.key)
+                    trace.filtered_keys.append(inst.key)
+                    trace.add_attempt(inst.key, "filtered",
+                                      reason=f"context_window {inst.context_window} < {request_context}")
     if not pool:
-        raise TierExhaustedError(tier)
+        raise TierExhaustedError(tier, trace=trace)
 
+    tid = trace.trace_id if trace else "-"
     path = _endpoint_path(req)
     original_headers: dict[str, Any] = req.get("_headers", {}) or {}
     last_status: int | None = None
 
     for inst in pool:
         if _router.cooldowns.in_cooldown(inst.key):
+            if trace:
+                trace.add_attempt(inst.key, "cooldown_skip",
+                                  reason="instance in cooldown")
             continue
         headers = _build_headers(inst, original_headers)
         attempt = 0
         while attempt <= num_retries:
             data = json.dumps(_patch_model(req, inst)).encode()
+            t0 = time.monotonic()
             try:
                 resp, conn = _connect(inst, path, data, headers, timeout)
-            except Exception:
+            except Exception as exc:
+                ms = (time.monotonic() - t0) * 1000
+                if trace:
+                    trace.add_attempt(inst.key, "error",
+                                      reason=f"connect: {type(exc).__name__}", ms=ms)
                 attempt += 1
                 continue
+            ms = (time.monotonic() - t0) * 1000
             if resp.status >= 400:
                 last_status = resp.status
                 body = resp.read()
                 retry_after = resp.getheader("Retry-After")
-                hdrs = {k.lower(): v for k, v in resp.getheaders()}
                 _router.stats.record_failure(inst.key)
+                if trace:
+                    trace.add_attempt(inst.key, "error", status=resp.status,
+                                      retry_after=int(retry_after) if retry_after else None,
+                                      ms=ms)
                 if _is_retryable_status(resp.status) and attempt < num_retries:
                     attempt += 1
                     conn.close()
                     continue
-                # Retries exhausted for this instance: cooldown + try next
-                # instance in the pool (don't give up the whole tier yet).
                 _router.cooldowns.mark(inst.key, retry_after)
-                print(f"[tier] {inst.key} -> HTTP {resp.status}, cooling down; "
+                if trace:
+                    trace.cooldowns_set.append(inst.key)
+                print(f"[tier:{tid}] {inst.key} -> HTTP {resp.status}, cooling down; "
                       f"trying next instance in '{tier}' (streaming)")
                 conn.close()
-                break  # -> next instance in `for inst in pool`
+                break  # -> next instance in for inst in pool
             client_hdrs = {k.lower(): v for k, v in resp.getheaders()}
             _router.stats.record_success(inst.key)
+            if trace:
+                trace.served_by = inst.key
+                trace.add_attempt(inst.key, "ok", status=resp.status, ms=ms)
             if cascade and inst.key not in primary_keys:
-                print(f"[tier] '{tier}' stream served by cascade instance "
+                print(f"[tier:{tid}] '{tier}' stream served by cascade instance "
                       f"{inst.key} (requested tier exhausted / cooling down)")
-            # Model field intentionally NOT rewritten here, unlike the
-            # buffered path: doing so would mean parsing and re-serializing
-            # every SSE chunk instead of the current low-overhead
-            # readline()-and-relay approach (see proxy.py's streaming
-            # design notes from the non-tier path this mirrors). The
-            # model name upstream itself reports in each chunk (typically
-            # the bare model id, e.g. "glm-5.2") is passed through as-is
-            # -- not as precise as the buffered path's full
-            # "provider/model" rewrite, but zero-cost and still tells the
-            # agent which underlying model answered, just not which
-            # provider's copy of it.
             return TierStreamResult(resp.status, client_hdrs, None, resp, conn, False), inst
-    print(f"[tier] '{tier}' exhausted -- every instance in the pool failed "
+    print(f"[tier:{tid}] '{tier}' exhausted -- every instance in the pool failed "
           f"(last HTTP {last_status}, streaming)")
-    raise TierExhaustedError(tier, last_status)
+    raise TierExhaustedError(tier, last_status, trace=trace)

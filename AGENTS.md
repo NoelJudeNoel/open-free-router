@@ -86,6 +86,7 @@ src/open_free_router/
   4. provider/upstream_id `nvidia-nim/z-ai/glm-5.2` (OMP format)
 - **Tier routing** — virtual IDs `tier/high|mid|low` expand to an ordered pool of upstream instances (by `_INSTANCE_PRIORITY` then context window), with per-instance retry (1), cooldown (60s, honoring Retry-After), and automatic failover; context-window pre-filter; exhaustion → 429 with last real status. Streaming switches only before first byte. `reset_tier_state()` is wired into `rebuild_proxy_index()` (called by every registry-change path). The tier lists and priority table in `tiers.py` are hand-maintained, not derived from refresh
 - **Internal-key hygiene** — `proxy.py` stashes `_endpoint_path`/`_headers` on the request dict; `upstream._patch_model()` strips `_`-prefixed keys before serializing so routing internals never leak into upstream request bodies
+- **Tier observability (per-request trail)** — `TierTrace` dataclass collects the full failover trail for each `tier/*` request: which instances were filtered by context-window, which failed (status/retry_after/ms), which were cooled down, and which ultimately served. The proxy surfaces this via 4 channels: **T0 response headers** (`X-OFR-Trace`/`X-OFR-Tier`/`X-OFR-Served-By`/`X-OFR-Attempts`/`X-OFR-Filtered`/`X-OFR-Cascade`/`X-OFR-Cooldown-Set`/`X-OFR-Request-Context`) — always on, zero body impact, works for streaming (sent before first SSE byte); **T1 failure body** — 429 `error.x_ofr.attempts[]` with full trail; **T2 opt-in debug body** — non-streaming 2xx gets `x_ofr` field when request sends `X-OFR-Debug: true`; **T3 structured log** — `[tier:{trace_id}]` lines correlate with headers. Design principle: "no-feel is default, transparency is opt-in" — automatic failover/cascade is invisible by design, but the black box is openable on demand
 - **Sync** — `open-free-router sync` writes Pi models.json, OMP models.yml (ruamel.yaml round-trip, preserves hand edits), OpenCode opencode.json, and ensures Hermes custom_providers entry from registry; backs up existing configs to `~/.openclaw/agent-backup/`
 - **Sync dedup** — before writing, removes all providers pointing to local proxy (baseURL contains 127.0.0.1/localhost) to prevent duplicate accumulation; Pi always overwrites entire file
 
@@ -96,13 +97,13 @@ src/open_free_router/
 
 ## Testing
 
-- 231 tests across 20 files (run: `pip install -e ".[dev]" && python3 -m pytest tests/ -v`):
-  - `test_tier_routing.py` (69) — tier pool expansion, priority ordering, context pre-filter, failover/cooldown, upstream path prefix, _normalize suffix stripping, regression tests for all tier-hardening fixes
+- 238 tests across 20 files (run: `pip install -e ".[dev]" && python3 -m pytest tests/ -v`):
+  - `test_tier_routing.py` (77) — tier pool expansion, priority ordering, context pre-filter, failover/cooldown, upstream path prefix, _normalize suffix stripping, regression tests for all tier-hardening fixes, TierTrace per-request trail (filtered/error/ok attempts, cascade path, cooldowns set, served_by)
   - `test_registry.py` (24) — ModelInfo, ProviderConfig, Registry CRUD, proxy index
   - `test_ui_auth.py` (20) — token gating of POST endpoints + business logic (status, config, models, providers, refresh, /api/health)
   - `test_sync.py` (12) — Pi/OpenCode/Hermes sync, placeholder-key enforcement, stale removal, dispatch
   - `test_refresh_sources_new.py` (11) + `test_refresh_sources_second_audit.py` (7) — refresh-source allowlist/parse behavior
-  - `test_proxy_hardening.py` (11) — body limits, content-length handling, error paths, /healthz
+  - `test_proxy_hardening.py` (13) — body limits, content-length handling, error paths, /healthz, tier observability (X-OFR headers, opt-in x_ofr body)
   - `test_hot_reload.py` (9) — daemon registry hot-reload (watchdog + SIGUSR1), CLI daemon notify
   - `test_instance_guard.py` (8), `test_refresh_source_nvidia_nim.py` (10), `test_registry_git_history.py` (7), `test_refresh_sources_second_audit.py` (7), `test_config.py` (6), `test_cli.py` (6), `test_scheduler.py` (6), `test_sync_omp.py` (5), `test_upstream_url_anchoring.py` (5), `test_refresh.py` (4), `test_production_incident_nous_sensenova.py` (4), `test_streaming.py` (2), `test_serve.py` (2)
 - `tests/e2e_test.py` is a manual live smoke-test script (real API calls + real agent configs) — excluded from `pytest` via `addopts = --ignore=...`; run it directly: `python tests/e2e_test.py`

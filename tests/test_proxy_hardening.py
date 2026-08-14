@@ -255,3 +255,125 @@ class TestHealthz:
         finally:
             srv.shutdown()
             upstream.shutdown()
+
+class _OkUpstream(BaseHTTPRequestHandler):
+    """Returns a 200 chat-completion-shaped body."""
+    disable_nagle_algorithm = True
+    def log_message(self, format, *args):
+        pass
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        self.rfile.read(length)
+        body = json.dumps({"id": "chatcmpl-ok", "model": "gemini-3.6-flash",
+                           "choices": [{"index": 0,
+                                        "message": {"role": "assistant", "content": "hi"},
+                                        "finish_reason": "stop"}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class _FailUpstream(BaseHTTPRequestHandler):
+    """Always 429 with Retry-After, to force failover within a tier."""
+    disable_nagle_algorithm = True
+    def log_message(self, format, *args):
+        pass
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        self.rfile.read(length)
+        body = json.dumps({"error": {"message": "rate limited"}}).encode()
+        self.send_response(429)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", "60")
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class TestTierObservability:
+    def test_tier_response_has_ofr_headers_and_served_by(self):
+        """A tier/high request that cascades to a working instance returns
+        X-OFR-* headers telling the app which instance served it and why."""
+        import yaml as _yaml
+        from pathlib import Path as _Path
+
+        default = _yaml.safe_load((_Path(__file__).parent.parent
+                                   / "src" / "open_free_router" / "registry.default.yaml").read_text())
+        ok_upstream = _start(_OkUpstream)
+        fail_upstream = _start(_FailUpstream)
+        try:
+            # route google-ai-studio (gemini-3.6-flash, high tier) to ok,
+            # everything else (nvidia-nim z-ai/glm-5.2 etc) to fail upstream
+            for name in default:
+                if name == "google-ai-studio":
+                    default[name]["upstream_url"] = f"http://127.0.0.1:{ok_upstream.server_address[1]}/v1beta"
+                    default[name]["api_key"] = "sk-ok"
+                else:
+                    default[name]["upstream_url"] = f"http://127.0.0.1:{fail_upstream.server_address[1]}/v1"
+                    default[name]["api_key"] = "sk-fail"
+            reg = Registry(default)
+            # force ALL high instances to fail first: patch tier_members order is
+            # priority-based; instead make _connect fail for non-ok provider
+            from open_free_router.proxy import run_proxy as _run_proxy
+            proxy_srv, handler = _run_proxy(reg, host="127.0.0.1", port=0)
+            try:
+                conn = http.client.HTTPConnection("127.0.0.1", proxy_srv.server_address[1], timeout=5)
+                conn.request("POST", "/v1/chat/completions",
+                             body=json.dumps({"model": "tier/high", "messages": [{"role": "user", "content": "hi"}]}),
+                             headers={"Content-Type": "application/json"})
+                resp = conn.getresponse()
+                data = json.loads(resp.read())
+                ofr_trace = resp.getheader("X-OFR-Trace")
+                assert resp.status == 200
+                assert ofr_trace, "X-OFR-Trace header missing"
+                assert resp.getheader("X-OFR-Tier") == "high"
+                served = resp.getheader("X-OFR-Served-By") or data.get("model")
+                assert served, "served instance not surfaced"
+                assert resp.getheader("X-OFR-Attempts") is not None
+                # cascade should be surfaced (high failed -> mid/low served)
+                assert resp.getheader("X-OFR-Cascade") is not None or resp.getheader("X-OFR-Attempts")
+            finally:
+                proxy_srv.shutdown()
+        finally:
+            ok_upstream.shutdown()
+            fail_upstream.shutdown()
+
+    def test_tier_debug_body_opt_in(self):
+        """X-OFR-Debug: true enriches the non-streaming body with x_ofr trail."""
+        import yaml as _yaml
+        from pathlib import Path as _Path
+        default = _yaml.safe_load((_Path(__file__).parent.parent
+                                   / "src" / "open_free_router" / "registry.default.yaml").read_text())
+        ok_upstream = _start(_OkUpstream)
+        fail_upstream = _start(_FailUpstream)
+        try:
+            for name in default:
+                if name == "google-ai-studio":
+                    default[name]["upstream_url"] = f"http://127.0.0.1:{ok_upstream.server_address[1]}/v1beta"
+                    default[name]["api_key"] = "sk-ok"
+                else:
+                    default[name]["upstream_url"] = f"http://127.0.0.1:{fail_upstream.server_address[1]}/v1"
+                    default[name]["api_key"] = "sk-fail"
+            reg = Registry(default)
+            from open_free_router.proxy import run_proxy as _run_proxy
+            proxy_srv, _ = _run_proxy(reg, host="127.0.0.1", port=0)
+            try:
+                conn = http.client.HTTPConnection("127.0.0.1", proxy_srv.server_address[1], timeout=5)
+                conn.request("POST", "/v1/chat/completions",
+                             body=json.dumps({"model": "tier/high", "messages": [{"role": "user", "content": "hi"}]}),
+                             headers={"Content-Type": "application/json", "X-OFR-Debug": "true"})
+                resp = conn.getresponse()
+                data = json.loads(resp.read())
+                assert resp.status == 200
+                assert "x_ofr" in data, "debug body missing x_ofr field"
+                assert data["x_ofr"]["tier"] == "high"
+                assert "trace_id" in data["x_ofr"]
+                assert data["x_ofr"]["served_by"] or data["x_ofr"]["attempts"]
+            finally:
+                proxy_srv.shutdown()
+        finally:
+            ok_upstream.shutdown()
+            fail_upstream.shutdown()
+

@@ -257,5 +257,23 @@ def tier_cascade_pool(tier: str, registry: Registry, request_context: int = 0) -
     return combined
 
 
+def tier_filtered_instances(tier: str, registry: Registry,
+                            request_context: int = 0) -> list[UpstreamInstance]:
+    """Instances in tier's full pool that were *filtered out* by the
+    context-window pre-check (context_window < request_context).
+
+    The hot path (tier_members/tier_cascade_pool) just skips these; this
+    exists so observability code can tell the caller what was excluded
+    and why (per-request trail: X-OFR-Filtered header, x_ofr body).
+    Returns [] when request_context is 0/None (no filtering happened).
+    """
+    if not request_context:
+        return []
+    full = tier_members(tier, registry, request_context=0)
+    kept = tier_members(tier, registry, request_context=request_context)
+    kept_keys = {i.key for i in kept}
+    return [i for i in full if i.key not in kept_keys]
+
+
 def is_tier_id(model: str) -> bool:
     return model in TIER_IDS
