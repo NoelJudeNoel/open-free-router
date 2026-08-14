@@ -312,6 +312,11 @@ def test_api_config_get_returns_current_config(tmp_path):
         assert resp.status == 200
         assert "proxy:" in data["yaml"]
         assert "port: 9999" in data["yaml"]
+        # effective config includes defaults not present in the raw file
+        assert "effective" in data
+        assert data["effective"]["refresh_interval_hours"] == 12
+        assert data["effective"]["upstream_timeout"] == 120
+        assert data["effective"]["proxy_port"] == 9999
     finally:
         srv.shutdown()
 

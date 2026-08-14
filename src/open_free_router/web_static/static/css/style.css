@@ -37,6 +37,13 @@ h2 { font-size: 1.1rem; color: #94a3b8; margin-bottom: 0.75rem; text-transform: 
   line-height: 1.6; resize: vertical;
 }
 .config-actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.75rem; }
+.effective-config {
+  background: #0f172a; border: 1px solid #1e293b; border-radius: 6px;
+  padding: 0.6rem 0.75rem; margin-bottom: 0.75rem; font-size: 0.8rem;
+}
+.effective-row { display: flex; justify-content: space-between; padding: 0.15rem 0; }
+.eff-key { color: #94a3b8; }
+.eff-val { color: #e2e8f0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .btn {
   background: #334155; color: #e2e8f0; border: 1px solid #475569;
   padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem;

@@ -197,6 +197,33 @@ async function loadConfig() {
   const data = await r.json();
   $('config-editor').value = data.yaml;
   maskApiKeys();
+  renderEffectiveConfig(data.effective);
+}
+
+// Show the effective config (values including defaults, e.g.
+// refresh_interval_hours=12 when the raw file doesn't set it) as a
+// read-only summary above the editor.
+function renderEffectiveConfig(eff) {
+  const el = $('effective-config');
+  if (!eff || Object.keys(eff).length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  const rows = [
+    ['refresh_interval_hours', eff.refresh_interval_hours + ' h'],
+    ['upstream_timeout', eff.upstream_timeout + ' s'],
+    ['tier_cascade', eff.tier_cascade ? 'on' : 'off'],
+    ['proxy', eff.proxy_host + ':' + eff.proxy_port],
+    ['ui', eff.ui_host + ':' + eff.ui_port],
+    ['registry', eff.registry_path],
+    ['registry_git_history', eff.registry_git_history ? 'on' : 'off'],
+  ];
+  el.innerHTML =
+    '<div class="config-note"><strong>Effective config (incl. defaults):</strong></div>' +
+    rows.map(([k, v]) =>
+      '<div class="effective-row"><span class="eff-key">' + k + '</span>' +
+      '<span class="eff-val">' + v + '</span></div>'
+    ).join('');
 }
 
 function maskApiKeys() {

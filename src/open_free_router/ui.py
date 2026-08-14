@@ -144,11 +144,21 @@ class _UIHandler(BaseHTTPRequestHandler):
         self._send_json(200, models)
 
     def _api_config_get(self):
+        # effective: resolved values including defaults, so the dashboard
+        # can show refresh_interval_hours=12 etc. even when the raw file
+        # doesn't set them. Compute from the live Config object (it has
+        # the same defaults the daemon uses).
+        effective = {}
+        if self.cfg is not None:
+            try:
+                effective = self.cfg.effective()
+            except Exception:
+                effective = {}
         if not self.config_path or not self.config_path.exists():
-            self._send_json(200, {"yaml": ""})
+            self._send_json(200, {"yaml": "", "effective": effective})
             return
         content = self.config_path.read_text()
-        self._send_json(200, {"yaml": content})
+        self._send_json(200, {"yaml": content, "effective": effective})
 
     def _api_config_post(self):
         if not self.config_path:

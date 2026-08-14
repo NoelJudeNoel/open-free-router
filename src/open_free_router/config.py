@@ -69,6 +69,26 @@ class Config:
         # committed by accident.
         self.registry_git_history = bool(self._raw.get("registry_git_history", False))
 
+    def effective(self) -> dict:
+        """Current effective config, including every default the loader
+        applies when a key is absent from config.yaml. Lets the dashboard
+        show "what is actually in effect" (e.g. refresh_interval_hours=12
+        when the file doesn't set it) instead of only the raw file text.
+        """
+        return {
+            "config_path": str(self.path) if self.path else None,
+            "registry_path": str(self.registry_path),
+            "proxy_host": self.proxy_host,
+            "proxy_port": self.proxy_port,
+            "ui_host": self.ui_host,
+            "ui_port": self.ui_port,
+            "refresh_interval_hours": self.refresh_interval_hours,
+            "upstream_timeout": self.upstream_timeout,
+            "tier_cascade": self.tier_cascade,
+            "registry_git_history": self.registry_git_history,
+            "data_dir": str(self.data_dir),
+        }
+
     @staticmethod
     def _find_config() -> Optional[Path]:
         for p in DEFAULT_CONFIG_PATHS:
