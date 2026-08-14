@@ -36,8 +36,8 @@ pip install -e .
 |---|---|
 | `open-free-router serve` | **★ One command:** proxy(8337) + UI(9057) + scheduler(12h) |
 | `open-free-router setup` | Interactive wizard: fill in API keys for all providers |
-| `open-free-router refresh [--source NAME] [--dry-run]` | Refresh free models from APIs |
-| `open-free-router add NAME --base-url URL [--model ID] [--auto-refresh]` | Add a provider |
+| `open-free-router refresh [--source NAME] [--dry-run]` | Refresh free models from APIs; on real changes, saves registry and auto-notifies the running daemon to hot-reload (no restart) |
+| `open-free-router add NAME --base-url URL [--model ID] [--auto-refresh]` | Add a provider (also triggers hot-reload) |
 | `open-free-router ui` | Web dashboard standalone (debug) |
 
 ## Quick Start (first-time users)
@@ -99,6 +99,15 @@ registry_git_history: false
 ```
 
 First `serve` auto-creates config + registry from defaults — no manual setup needed.
+
+### Hot reload: edit registry.yaml without restarting
+
+The running daemon picks up registry.yaml changes through two channels:
+
+- **CLI notification**: after `open-free-router refresh` / `add` saves the registry, it sends `SIGUSR1` to the daemon (PID read from the pidfile), which hot-reloads within ~2 seconds — no restart.
+- **mtime watchdog**: the daemon stats registry.yaml every ~10 seconds; any write (CLI, manual edit) triggers a reload.
+
+A hot reload only refreshes the **in-memory routing tables** (model list, provider config, tier pools). It does **not** rewrite agent config files (Pi/OMP/OpenCode/Hermes) — that remains the job of `open-free-router sync` and the scheduler cycle.
 
 ### Security notes
 
@@ -205,6 +214,8 @@ recently," not a persisted metrics store.
 | `/api/models` | GET | Model details grouped by provider |
 | `/api/config` | GET / POST | Read / write config.yaml |
 | `/api/refresh` | POST | Trigger model refresh (optional `--source`) |
+| `/healthz` | GET | Health check (no auth; process alive + registry loaded) |
+| `/api/health` | GET | Readiness probe (no auth; includes last scheduler cycle status) |
 
 ## Tests
 

@@ -46,6 +46,8 @@ class _UIHandler(BaseHTTPRequestHandler):
             self._serve_file("web_static/static/css/style.css", "text/css")
         elif self.path == "/static/app.js":
             self._serve_file("web_static/static/js/app.js", "application/javascript")
+        elif self.path == "/api/health":
+            self._api_health()
         elif self.path == "/api/status":
             self._api_status()
         elif self.path == "/api/models":
@@ -83,6 +85,29 @@ class _UIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _api_health(self):
+        """Readiness probe for systemd HealthCheck / uptime monitoring.
+
+        No auth (read-only, reveals no keys): reports whether the UI
+        process is up, whether it has a registry loaded, and the latest
+        scheduler cycle outcome. 200 when healthy; 503 when the registry
+        is missing or the last scheduler cycle errored — a monitoring
+        bot can page on that without needing the dashboard token.
+        """
+        from open_free_router import __version__
+        healthy = self.reg is not None
+        sched = self.scheduler_status or {}
+        if sched.get("last_error"):
+            healthy = False
+        self._send_json(200 if healthy else 503, {
+            "ok": healthy,
+            "service": "open-free-router-ui",
+            "version": __version__,
+            "providers": len(self.reg.providers) if self.reg else 0,
+            "scheduler_last_ok": sched.get("last_ok"),
+            "scheduler_last_error": sched.get("last_error"),
+        })
 
     def _api_status(self):
         status = {

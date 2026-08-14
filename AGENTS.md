@@ -73,6 +73,7 @@ src/open_free_router/
 - **Pi models.json** written by `serve.py` on startup and after each refresh, and by `ui.py` on changes. Format: `{providers: {name: {baseUrl, models: [...]}}}`. All providers point to local proxy; routing is by model ID
 - **Scheduler interval** configurable via `config.yaml: refresh_interval_hours` (default 12)
 - **Registry hot-reload** — the daemon watches registry.yaml's mtime (every ~10s) AND handles SIGUSR1 (sent by `open-free-router refresh`/`add` after saving). Either triggers an in-process reload of the registry into the proxy/UI/scheduler without restarting serve. Agent configs (Pi/OMP/OpenCode/Hermes) are NOT rewritten by a reload — that stays the job of `open-free-router sync` / the scheduler cycle
+- **Health endpoints** — proxy `GET /healthz` and UI `GET /api/health` (both unauthenticated readiness probes, no keys revealed; UI one includes scheduler last_ok/last_error). The shipped systemd unit uses `HealthCheckCommand=curl -fsS http://127.0.0.1:8337/healthz` (needs systemd >= 253) plus a `StartLimitBurst=5` crash-loop guard. Version: `open-free-router --version` / `__version__` (single source `src/open_free_router/__init__.py`, mirrored in pyproject.toml; bump in lockstep with CHANGELOG.md)
 - **Single-instance guard** — `_instance_guard.py` probes ports + takes a pidfile flock before `serve` starts; refuses/exit otherwise (prevents systemd auto-restart loops)
 - **UI auth** — all dashboard POST endpoints require `Authorization: Bearer <token>` (`ui.token`, constant-time compare via `hmac.compare_digest`); `token=""` disables (tests only)
 - **ModelInfo** fields: `id` (short display name, e.g. `glm-5.2`), `upstream_id` (optional, e.g. `z-ai/glm-5.2`, falls back to `id`), `name`, `context_window`, `max_tokens`, `reasoning`
@@ -95,17 +96,17 @@ src/open_free_router/
 
 ## Testing
 
-- 226 tests across 20 files (run: `pip install -e ".[dev]" && python3 -m pytest tests/ -v`):
+- 231 tests across 20 files (run: `pip install -e ".[dev]" && python3 -m pytest tests/ -v`):
   - `test_tier_routing.py` (69) — tier pool expansion, priority ordering, context pre-filter, failover/cooldown, upstream path prefix, _normalize suffix stripping, regression tests for all tier-hardening fixes
   - `test_registry.py` (24) — ModelInfo, ProviderConfig, Registry CRUD, proxy index
-  - `test_ui_auth.py` (18) — token gating of POST endpoints + business logic (status, config, models, providers, refresh)
+  - `test_ui_auth.py` (20) — token gating of POST endpoints + business logic (status, config, models, providers, refresh, /api/health)
   - `test_sync.py` (12) — Pi/OpenCode/Hermes sync, placeholder-key enforcement, stale removal, dispatch
   - `test_refresh_sources_new.py` (11) + `test_refresh_sources_second_audit.py` (7) — refresh-source allowlist/parse behavior
-  - `test_proxy_hardening.py` (9) — body limits, content-length handling, error paths
+  - `test_proxy_hardening.py` (11) — body limits, content-length handling, error paths, /healthz
   - `test_hot_reload.py` (9) — daemon registry hot-reload (watchdog + SIGUSR1), CLI daemon notify
-  - `test_instance_guard.py` (8), `test_refresh_source_nvidia_nim.py` (10), `test_registry_git_history.py` (7), `test_refresh_sources_second_audit.py` (7), `test_config.py` (6), `test_cli.py` (6), `test_scheduler.py` (5), `test_sync_omp.py` (5), `test_upstream_url_anchoring.py` (5), `test_refresh.py` (4), `test_production_incident_nous_sensenova.py` (4), `test_streaming.py` (2), `test_serve.py` (2)
+  - `test_instance_guard.py` (8), `test_refresh_source_nvidia_nim.py` (10), `test_registry_git_history.py` (7), `test_refresh_sources_second_audit.py` (7), `test_config.py` (6), `test_cli.py` (6), `test_scheduler.py` (6), `test_sync_omp.py` (5), `test_upstream_url_anchoring.py` (5), `test_refresh.py` (4), `test_production_incident_nous_sensenova.py` (4), `test_streaming.py` (2), `test_serve.py` (2)
 - `tests/e2e_test.py` is a manual live smoke-test script (real API calls + real agent configs) — excluded from `pytest` via `addopts = --ignore=...`; run it directly: `python tests/e2e_test.py`
-- CI: `.github/workflows/tests.yml` runs the suite on Python 3.11 + 3.12
+- CI: `.github/workflows/tests.yml` runs the suite on Python 3.11 + 3.12 + 3.13
 - Some refresh sources hit live provider APIs and are not covered by CI (network-dependent); verify with `open-free-router refresh --source NAME` when changing them
 
 ## Supported providers (7)

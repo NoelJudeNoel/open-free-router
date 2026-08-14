@@ -36,8 +36,8 @@ pip install -e .
 |---|---|
 | `open-free-router serve` | **★ 一条命令启动：** proxy(8337) + UI(9057) + 定时刷新(12h) |
 | `open-free-router setup` | 交互式向导：填写各上游源 API key |
-| `open-free-router refresh [--source NAME] [--dry-run]` | 拉取免费模型列表 |
-| `open-free-router add NAME --base-url URL [--model ID] [--auto-refresh]` | 添加 provider |
+| `open-free-router refresh [--source NAME] [--dry-run]` | 拉取免费模型列表；有实际变更时保存 registry 并自动通知运行中的 daemon 热重载（无需重启） |
+| `open-free-router add NAME --base-url URL [--model ID] [--auto-refresh]` | 添加 provider（同样自动热重载） |
 | `open-free-router ui` | 单独启动 Web 仪表盘（调试用） |
 
 ## 新手快速上手
@@ -103,6 +103,15 @@ tier_cascade: true
 ```
 
 首次运行 `serve` 自动创建配置文件和注册表，无需手动初始化。
+
+### 热重载：改了 registry 不用重启
+
+运行中的 daemon 会通过两条通道自动加载 registry.yaml 的最新内容：
+
+- **CLI 通知**：`open-free-router refresh` / `add` 保存 registry 后，会自动向 daemon 发 `SIGUSR1` 信号，daemon 收到后立刻热重载（约 2 秒内生效，无需重启）。
+- **mtime 监听**：daemon 每约 10 秒检查一次 registry.yaml 的修改时间，任何方式改文件（CLI、手工编辑）都会触发热重载。
+
+热重载只更新**内存中的路由表**（模型列表、provider 配置、tier 池），**不会**重写各 Agent 的配置文件（Pi/OMP/OpenCode/Hermes）——那仍然是 `open-free-router sync` 和定时调度器的职责。
 
 ### 安全说明
 
@@ -176,6 +185,8 @@ tier_cascade: true
 | `/api/models` | GET | 按 provider 分组的模型详情 |
 | `/api/config` | GET / POST | 配置文件的读取和写入 |
 | `/api/refresh` | POST | 手动触发刷新（可指定 --source） |
+| `/healthz` | GET | 健康检查（无鉴权，进程存活 + registry 已加载） |
+| `/api/health` | GET | 就绪探针（无鉴权，含调度器最近周期状态） |
 
 ## 测试
 

@@ -7,6 +7,7 @@ import os
 import signal
 import sys
 from pathlib import Path
+from open_free_router import __version__
 from open_free_router.config import Config
 from open_free_router.registry import Registry, ModelInfo, ProviderConfig
 from open_free_router.refresh import refresh
@@ -206,6 +207,8 @@ def main(args: list[str] | None = None):
         prog="open-free-router",
         description="Free LLM model router & sync engine",
     )
+    parser.add_argument("--version", action="version",
+                        version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     p_refresh = sub.add_parser("refresh", help="refresh free model lists from APIs")

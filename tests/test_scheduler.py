@@ -69,6 +69,60 @@ class TestSchedulerResilience:
         assert "disk full" in d.scheduler_status["last_error"]
 
 
+class TestSchedulerRealCycle:
+    """Full _run_cycle() against a real (non-mocked) refresh source +
+    local filesystem — proves the whole scheduler path works end to end:
+    fetch → detect change → save registry → rebuild index → write Pi →
+    sync agents → set last_ok. This is the closest CI can get to the
+    production 12h cycle without waiting 12 hours."""
+
+    def test_real_cycle_with_fake_upstream(self, tmp_path, monkeypatch):
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        # A fake "openrouter-style" upstream returning a model list.
+        class _FakeUpstream(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                body = json.dumps({"data": [
+                    {"id": "m1:free", "pricing": {"prompt": "0"}, "architecture": {"input_modalities": ["text"]}},
+                    {"id": "m2:free", "pricing": {"prompt": "0"}, "architecture": {"input_modalities": ["text"]}},
+                ]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _FakeUpstream)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            # Point the openrouter refresh source at our fake upstream
+            d = _daemon(tmp_path, providers={
+                "openrouter": {
+                    "upstream_url": f"http://127.0.0.1:{srv.server_address[1]}/v1",
+                    "api_key": "sk-test",
+                    "models": [],
+                },
+            })
+            monkeypatch.setattr(d.cfg, "registry_path", tmp_path / "registry.yaml")
+            # _run_cycle writes agent configs via sync_all — isolate those paths
+            with patch("open_free_router.serve.write_pi_models"), \
+                 patch("open_free_router.serve.sync_all"), \
+                 patch("open_free_router.serve.rebuild_proxy_index"):
+                d._run_cycle()
+            assert d.scheduler_status["last_ok"] is not None, "scheduler must set last_ok after a successful cycle"
+            assert d.scheduler_status["last_error"] is None
+            # registry.yaml should now contain the fetched models
+            saved = Registry.load(tmp_path / "registry.yaml")
+            assert len(saved.providers["openrouter"].models) == 2
+        finally:
+            srv.shutdown()
+
+
 class TestSchedulerChangeGating:
     @patch("open_free_router.serve.sync_all")
     @patch("open_free_router.serve.write_pi_models")

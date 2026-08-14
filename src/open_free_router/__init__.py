@@ -7,3 +7,7 @@ Quick start:
     open-free-router refresh # one-time free model list refresh
     open-free-router add     # add a provider
 """
+
+# Single source of truth for the CLI --version flag and diagnostics.
+# Bump in lockstep with CHANGELOG.md. pyproject.toml keeps the same value.
+__version__ = "0.1.0"

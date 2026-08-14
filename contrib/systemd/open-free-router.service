@@ -9,6 +9,19 @@ WorkingDirectory=/opt/open-free-router
 ExecStart=/opt/open-free-router/.venv/bin/open-free-router serve
 Restart=on-failure
 RestartSec=5
+# Health check: the proxy's /healthz returns 200 when the process is up
+# and a registry is loaded, 503 otherwise. systemd marks the unit failed
+# after this many consecutive unhealthy probes.
+# Requires systemd >= 253 for HealthCheck support.
+HealthCheckCommand=curl -fsS http://127.0.0.1:8337/healthz
+HealthCheckIntervalSec=60
+HealthCheckTimeoutSec=5
+HealthCheckFailureAction=restart
+# Prevent a tight crash-loop (e.g. port taken by a second instance):
+# after 5 failures in 60s, stop trying and leave the unit failed so an
+# operator (not a restart loop) decides what to do next.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 Environment=PYTHONUNBUFFERED=1
 
 [Install]

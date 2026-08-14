@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from open_free_router.proxy import run_proxy
+from open_free_router.proxy import run_proxy, _ProxyHandler
 from open_free_router.registry import Registry
 
 
@@ -218,4 +218,40 @@ class TestBodySizeLimit:
             resp.read()
         finally:
             proxy_srv.shutdown()
+            upstream.shutdown()
+
+
+class TestHealthz:
+    def test_healthz_returns_ok_with_registry(self):
+        upstream = _start(_EchoUpstreamHandler)
+        proxy_srv, _ = _proxy_for(upstream.server_address[1])
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", proxy_srv.server_address[1], timeout=5)
+            conn.request("GET", "/healthz")
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            assert resp.status == 200
+            assert data["ok"] is True
+            assert data["service"] == "open-free-router"
+            assert "version" in data
+            assert data["providers"] == 1
+        finally:
+            proxy_srv.shutdown()
+            upstream.shutdown()
+
+    def test_healthz_503_when_no_registry(self):
+        upstream = _start(_EchoUpstreamHandler)
+        # Start a proxy with an empty registry so _ProxyHandler.registry
+        # is falsy on the health probe path.
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _ProxyHandler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+            conn.request("GET", "/healthz")
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            assert resp.status == 503
+            assert data["ok"] is False
+        finally:
+            srv.shutdown()
             upstream.shutdown()

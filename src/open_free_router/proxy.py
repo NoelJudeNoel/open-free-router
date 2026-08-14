@@ -77,17 +77,40 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         from urllib.parse import urlparse
         path = urlparse(self.path).path
         if path == "/":
+            from open_free_router import __version__
             self._send_json(200, {
                 "service": "open-free-router",
-                "version": "0.1",
+                "version": __version__,
                 "endpoints": {
                     "models": "/v1/models",
                     "chat": "/v1/chat/completions",
                     "completions": "/v1/completions",
                     "embeddings": "/v1/embeddings",
+                    "health": "/healthz",
                     "ui": f"http://{self.server.server_address[0]}:9057",
                 },
                 "docs": "https://github.com/NoelJudeNoel/open-free-router",
+            })
+            return
+        if path == "/healthz":
+            # Liveness/readiness for systemd HealthCheck, uptime bots,
+            # and container orchestrators. No auth: it only reveals that
+            # the proxy process is up and how many providers it can see
+            # (counts, never keys). 200 with "ok": true when the registry
+            # is loaded; 503 if the daemon somehow lost its registry.
+            from open_free_router import __version__
+            if not self.registry:
+                self._send_json(503, {
+                    "ok": False,
+                    "service": "open-free-router",
+                    "version": __version__,
+                })
+                return
+            self._send_json(200, {
+                "ok": True,
+                "service": "open-free-router",
+                "version": __version__,
+                "providers": len(self.registry.providers),
             })
             return
         if path == "/v1/models":

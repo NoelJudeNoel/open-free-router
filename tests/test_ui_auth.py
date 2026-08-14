@@ -150,6 +150,40 @@ def test_get_endpoints_do_not_require_auth(tmp_path):
         resp.read()
     finally:
         srv.shutdown()
+
+
+def test_api_health_returns_ok(tmp_path):
+    """GET /api/health is an unauthenticated readiness probe."""
+    srv, port = _start_ui_with_registry(tmp_path, _populated_registry(), token="tok")
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/health")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert resp.status == 200
+        assert data["ok"] is True
+        assert data["service"] == "open-free-router-ui"
+        assert "version" in data
+        assert data["providers"] == 2
+    finally:
+        srv.shutdown()
+
+
+def test_api_health_503_when_scheduler_errored(tmp_path):
+    """A failed scheduler cycle flips /api/health to 503 so monitoring
+    can page without the dashboard token."""
+    srv, port = _start_ui_with_registry(tmp_path, _populated_registry(), token="tok")
+    try:
+        ui._UIHandler.scheduler_status = {"last_ok": None, "last_error": "boom"}
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/health")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert resp.status == 503
+        assert data["ok"] is False
+        assert data["scheduler_last_error"] == "boom"
+    finally:
+        srv.shutdown()
 # ── UI business logic tests (GET endpoints, POST with valid token) ──
 
 def _populated_registry():
