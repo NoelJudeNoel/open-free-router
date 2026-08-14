@@ -125,6 +125,10 @@ def test_low_tier_empty_by_default():
     ("mimo-v2.5-free", "mimo-v2.5"),
     ("m1:free", "m1"),
     ("glm-5.2", "glm-5.2"),
+    # date suffixes: -0731 (MMDD), -20250814 (YYYYMMDD), etc.
+    ("deepseek-ai/deepseek-v4-flash-0731", "deepseek-v4-flash"),
+    ("deepseek-v4-flash-0731", "deepseek-v4-flash"),
+    ("deepseek-v4-flash-20250814", "deepseek-v4-flash"),
 ])
 def test_normalize_strips_suffixes(uid, expected):
     from open_free_router.tiers import _normalize

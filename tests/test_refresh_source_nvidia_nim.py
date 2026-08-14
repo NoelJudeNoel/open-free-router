@@ -51,9 +51,11 @@ class TestNvidiaNim:
         mock_get.return_value = _mock_response(SAMPLE)
         models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
         ids = {m.id for m in models}
-        assert ids == nvidia_nim.KNOWN_FREE
+        # id is now the short canonical form (prefix stripped)
+        expected = {mid.split("/")[-1] for mid in nvidia_nim.KNOWN_FREE}
+        assert ids == expected
         assert "nvidia/cosmos3-nano" not in ids  # exists upstream, not free
-        assert "deepseek-ai/deepseek-v4-pro" not in ids  # sibling model, not the free -flash one
+        assert "deepseek-v4-pro" not in ids  # sibling model, not the free -flash one
 
     @patch("requests.get")
     def test_newly_added_entries_are_present(self, mock_get):
@@ -63,8 +65,8 @@ class TestNvidiaNim:
         mock_get.return_value = _mock_response(SAMPLE)
         models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
         ids = {m.id for m in models}
-        assert "mistralai/mistral-medium-3.5-128b" in ids
-        assert "deepseek-ai/deepseek-v4-flash" in ids
+        assert "mistral-medium-3.5-128b" in ids
+        assert "deepseek-v4-flash" in ids
 
     @patch("requests.get")
     def test_kimi_k2_6_included_k3_excluded(self, mock_get):
@@ -75,16 +77,16 @@ class TestNvidiaNim:
         mock_get.return_value = _mock_response(SAMPLE)
         models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
         ids = {m.id for m in models}
-        assert "moonshotai/kimi-k2.6" in ids
-        assert "moonshotai/kimi-k3" not in ids
+        assert "kimi-k2.6" in ids
+        assert "kimi-k3" not in ids
 
     @patch("requests.get")
     def test_reasoning_flag_from_id_heuristic(self, mock_get):
         mock_get.return_value = _mock_response(SAMPLE)
         models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
         by_id = {m.id: m for m in models}
-        assert by_id["nvidia/nemotron-3-ultra-550b-a55b"].reasoning is True
-        assert by_id["z-ai/glm-5.2"].reasoning is False
+        assert by_id["nemotron-3-ultra-550b-a55b"].reasoning is True
+        assert by_id["glm-5.2"].reasoning is False
 
     @patch("requests.get")
     def test_sends_bearer_auth(self, mock_get):
@@ -103,3 +105,25 @@ class TestNvidiaNim:
         mock_get.return_value = _mock_response({"data": [{"id": "some-unrelated-model"}]})
         models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
         assert models == []
+
+    @patch("requests.get")
+    def test_dated_variant_matches_canonical(self, mock_get):
+        """deepseek-ai/deepseek-v4-flash-0731 (dated build on the live API)
+        must be picked up, with id stripped to deepseek-v4-flash (so it
+        matches the HIGH tier logical_id) and upstream_id kept as the
+        full dated path (so the proxy sends the right name to NVIDIA)."""
+        mock_get.return_value = _mock_response({"data": [
+            {"id": "deepseek-ai/deepseek-v4-flash-0731", "context_length": 1048576},
+        ]})
+        models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
+        assert len(models) == 1
+        m = models[0]
+        assert m.id == "deepseek-v4-flash", f"id should be canonical, got {m.id}"
+        assert m.upstream_id == "deepseek-ai/deepseek-v4-flash-0731", f"upstream_id must keep full dated path, got {m.upstream_id}"
+
+    @patch("requests.get")
+    def test_sends_user_agent_header(self, mock_get):
+        mock_get.return_value = _mock_response({"data": []})
+        nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
+        _, kwargs = mock_get.call_args
+        assert kwargs["headers"]["User-Agent"] == "open-free-router/0.1"

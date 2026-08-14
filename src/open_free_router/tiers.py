@@ -20,9 +20,17 @@ tiers and only reachable (out of order) in the low catch-all pool.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .registry import ModelInfo, ProviderConfig, Registry
+
+
+# Strip trailing -MMDD / -YYYYMMDD date suffixes (e.g. deepseek-v4-flash-0731
+# -> deepseek-v4-flash) so dated builds match their canonical tier logical_id.
+# Only matches hyphen + 4+ digits at end-of-string: never touches real model
+# suffixes like -550b-a55b or -k2.6.
+_DATE_SUFFIX_RE = re.compile(r"-\d{4,}$")
 
 
 # ── Tier -> logical model id list ────────────────────────────────────────
@@ -150,6 +158,9 @@ def _normalize(uid: str) -> str:
     # All models in this router are free, so the :free / -free markers are
     # just provider convention noise, not part of the canonical name.
     uid = uid.removesuffix(":free").removesuffix("-free")
+    # Strip trailing date suffixes so dated builds (e.g. -0731) match the
+    # canonical logical id (e.g. deepseek-v4-flash).
+    uid = _DATE_SUFFIX_RE.sub("", uid)
     return uid
 
 
@@ -188,11 +199,17 @@ def tier_members(tier: str, registry: Registry, request_context: int = 0) -> lis
     logical_ids = list(TIERS.get(tier, []))
     if tier == "low":
         # low = everything in the registry not claimed by high/mid
-        claimed = set(TIERS["high"] + TIERS["mid"])
+        # Use the same matching logic as _expand_logical: a model is "claimed"
+        # if its id OR its normalized effective_upstream_id matches a high/mid logical_id.
+        claimed_keys = set()
+        for lid in TIERS["high"] + TIERS["mid"]:
+            for _prio, key, _prov, _mod in _expand_logical(lid, registry):
+                claimed_keys.add(key)  # key is "provider/upstream_id"
         logical_ids = []
         for p in registry.providers.values():
             for m in p.models:
-                if m.id not in claimed and m.id not in logical_ids:
+                inst = UpstreamInstance.for_provider(p, m)
+                if inst.key not in claimed_keys and inst.key not in logical_ids:
                     logical_ids.append(m.id)
 
     pool: list[tuple[int, UpstreamInstance]] = []

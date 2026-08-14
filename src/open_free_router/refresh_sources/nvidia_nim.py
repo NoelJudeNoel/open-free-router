@@ -2,11 +2,16 @@
 """NVIDIA NIM free models source."""
 from __future__ import annotations
 
+import re
 from typing import List
 
 import requests
 
 from open_free_router.registry import ModelInfo
+
+# Same pattern as tiers._DATE_SUFFIX_RE -- strip trailing -MMDD / -YYYYMMDD
+# date suffixes from model ids before the KNOWN_FREE allowlist match.
+_DATE_SUFFIX_RE = re.compile(r"-\d{4,}$")
 
 
 SOURCE_NAME = "nvidia-nim"
@@ -20,9 +25,12 @@ SOURCE_NAME = "nvidia-nim"
 # All four pre-existing entries below were re-confirmed present with a
 # "Free Endpoint" tag at the same time; two new ones were added
 # (mistral-medium-3.5-128b, deepseek-ai/deepseek-v4-flash) that weren't
-# previously in this list. Run `open-free-router refresh --source
-# nvidia-nim` against a real key to confirm before relying on the new
-# entries in production.
+# previously in this list. Note: NVIDIA NIM serves deepseek-v4 as a dated
+# build -- deepseek-ai/deepseek-v4-flash-0731 on the live API; fetch() now
+# strips the -MMDD date suffix before the KNOWN_FREE match so the dated
+# variant is recognised as the same model. Run `open-free-router refresh
+# --source nvidia-nim` against a real key to confirm before relying on the
+# new entries in production.
 #
 # moonshotai/kimi-k2.6 added same day, same confidence tier: confirmed
 # free via build.nvidia.com/moonshotai/kimi-k2.6 (own product page,
@@ -54,7 +62,7 @@ def fetch(provider_base_url: str, api_key: str | None = None) -> List[ModelInfo]
     try:
         r = requests.get(
             f"{provider_base_url}/models",
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"Authorization": f"Bearer {api_key}", "User-Agent": "open-free-router/0.1"},
             timeout=120,
         )
         r.raise_for_status()
@@ -65,10 +73,14 @@ def fetch(provider_base_url: str, api_key: str | None = None) -> List[ModelInfo]
 
     for m in data.get("data", []):
         mid = m.get("id", "")
-        if mid in KNOWN_FREE:
+        # Strip -MMDD date suffixes (e.g. -0731) so dated builds match
+        # the canonical KNOWN_FREE entries.
+        canonical_mid = _DATE_SUFFIX_RE.sub("", mid)
+        if canonical_mid in KNOWN_FREE:
+            short_id = canonical_mid.split("/")[-1]  # e.g. "deepseek-v4-flash"
             models.append(ModelInfo(
-                id=mid,
-                name=mid.split("/")[-1],
+                id=short_id,
+                upstream_id=mid,  # full API path WITH date suffix for forwarding
                 context_window=m.get("context_length", 131072) or 131072,
                 max_tokens=16384,
                 reasoning="nemotron" in mid.lower(),
