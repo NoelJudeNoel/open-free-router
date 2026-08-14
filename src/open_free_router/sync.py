@@ -17,6 +17,14 @@ from pathlib import Path
 
 from open_free_router.registry import Registry
 
+# Placeholder API key for all agent config syncs. The local proxy at
+# 127.0.0.1:8337 does NOT validate incoming credentials (it authenticates
+# to each upstream itself from the registry), so any non-empty value
+# satisfies the agent's "is this provider configured?" check without
+# exposing real upstream keys outside the registry.
+PROXY_PLACEHOLDER_KEY = "open-free-router"
+
+
 # ── Paths ──
 OMP_MODELS = Path.home() / ".omp" / "agent" / "models.yml"
 OMP_CONFIG = Path.home() / ".omp" / "agent" / "config.yml"
@@ -58,7 +66,7 @@ def write_pi_models(reg: Registry, do_write: bool = True, proxy_url: str = "http
                 # (it authenticates to each upstream itself from the
                 # registry), so a single non-empty placeholder satisfies
                 # Pi's "is this provider configured" gate for every channel.
-                "apiKey": "open-free-router",
+                "apiKey": PROXY_PLACEHOLDER_KEY,
                 "models": [
                     {
                         "id": f"{p.model_prefix}/{m.id}",
@@ -93,20 +101,6 @@ def _backup():
     for f in [OMP_MODELS, OMP_CONFIG, OPENCODE_CONFIG, HERMES_CONFIG]:
         if f.exists():
             shutil.copy2(str(f), str(BACKUP_DIR / f.name))
-
-
-def _real_key_or_placeholder(key: str) -> str:
-    """Return the real API key, or a placeholder if none is configured.
-
-    WARNING: this returns the full real key, NOT a masked version. The
-    function name is deliberately honest: sync writes real keys to agent
-    config files (Pi, OMP, OpenCode, Hermes) because each agent proxies
-    through the local router and needs the real upstream key. If you want
-    to avoid storing keys in agent configs, set the router's proxy to use
-    a fixed placeholder (like Pi already does with "open-free-router")
-    and have the agent send all requests through the router's auth.
-    """
-    return key or "sk-no-key"
 
 
 # ══════════════════════════════════════
@@ -173,10 +167,9 @@ def sync_omp(reg: Registry, do_write: bool = True, proxy_url: str = "http://127.
 
     changes = []
     for name, p in reg.providers.items():
-        key = _real_key_or_placeholder(p.effective_key)
         block = CommentedMap()
         block["baseUrl"] = proxy_url
-        block["apiKey"] = key
+        block["apiKey"] = PROXY_PLACEHOLDER_KEY
         block["api"] = "openai-completions"
         model_blocks = CommentedSeq()
         for m in p.models:
@@ -251,7 +244,6 @@ def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http:/
     # Write fresh entries from registry
     changes = []
     for name, p in reg.providers.items():
-        key = _real_key_or_placeholder(p.effective_key)
         models_map = {}
         for m in p.models:
             mkey = m.id.split("/")[-1].replace(":free", "")
@@ -268,7 +260,7 @@ def sync_opencode(reg: Registry, do_write: bool = True, proxy_url: str = "http:/
             "name": name.replace("-", " ").title(),
             "npm": "@ai-sdk/openai-compatible",
             "models": models_map,
-            "options": {"baseURL": proxy_url, "apiKey": key},
+            "options": {"baseURL": proxy_url, "apiKey": PROXY_PLACEHOLDER_KEY},
         }
         changes.append(name)
 
@@ -319,19 +311,11 @@ def sync_hermes(reg: Registry, do_write: bool = True, proxy_url: str = "http://1
     )
 
     if not has_entry:
-        # Add a custom_providers entry for the proxy
-        # Use the first provider's key as the API key
-        key = ""
-        for name, p in reg.providers.items():
-            if p.effective_key:
-                key = p.effective_key
-                break
-
         new_entry = {
             "name": "open-free-router",
             "api_mode": "chat_completions",
             "base_url": proxy_url,
-            "api_key": key or "sk-no-key",
+            "api_key": PROXY_PLACEHOLDER_KEY,
             "model": "glm-5.2",  # default model
             "context_length": 262144,
             "max_tokens": 16384,

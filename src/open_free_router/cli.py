@@ -173,7 +173,7 @@ def cmd_sync(args):
         print("  Restart agents to apply: omp-telegram, opencode, hermes")
 
 
-def main():
+def main(args: list[str] | None = None):
     parser = argparse.ArgumentParser(
         prog="open-free-router",
         description="Free LLM model router & sync engine",
@@ -208,7 +208,7 @@ def main():
     p_sync.add_argument("--diff", action="store_true", help="show diff only, don't write")
     p_sync.set_defaults(func=cmd_sync)
 
-    args = parser.parse_args()
+    args = parser.parse_args(args)
     if not args.command:
         parser.print_help()
         sys.exit(1)

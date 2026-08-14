@@ -150,3 +150,293 @@ def test_get_endpoints_do_not_require_auth(tmp_path):
         resp.read()
     finally:
         srv.shutdown()
+# ── UI business logic tests (GET endpoints, POST with valid token) ──
+
+def _populated_registry():
+    return Registry({
+        "openrouter": {
+            "upstream_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-or-1234567890abcdef",
+            "prefix": "or",
+            "models": [{"id": "m1:free", "context_window": 32000, "max_tokens": 4096}],
+        },
+        "nvidia-nim": {
+            "upstream_url": "https://api.nv.nim/v1",
+            "api_key": "sk-nv-secret",
+            "prefix": "nv",
+            "models": [
+                {"id": "glm-5.2", "context_window": 131072, "max_tokens": 4096, "reasoning": True},
+            ],
+        },
+    })
+
+
+def _start_ui_with_registry(tmp_path, reg, token="test-token"):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("proxy:\n  host: 127.0.0.1\n  port: 8337\nui:\n  host: 127.0.0.1\n  port: 0\n")
+    cfg = Config(config_path=config_path)
+
+    ui._UIHandler.cfg = cfg
+    ui._UIHandler.reg = reg
+    ui._UIHandler.config_path = cfg.path
+    ui._UIHandler.token = token
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ui._UIHandler)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    time.sleep(0.05)
+    return srv, srv.server_address[1]
+
+
+def test_api_status_returns_providers_and_tiers(tmp_path):
+    """GET /api/status returns provider list and tier routing info."""
+    reg = _populated_registry()
+    srv, port = _start_ui_with_registry(tmp_path, reg)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/status")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert resp.status == 200
+        assert len(data["providers"]) == 2
+        names = [p["name"] for p in data["providers"]]
+        assert "openrouter" in names
+        assert "nvidia-nim" in names
+        # Tier routing info is present (even if pools are empty)
+        assert "tiers" in data
+        assert "high" in data["tiers"]
+        assert "mid" in data["tiers"]
+        assert "low" in data["tiers"]
+        assert "scheduler" in data
+    finally:
+        srv.shutdown()
+
+
+def test_api_models_returns_grouped_models(tmp_path):
+    """GET /api/models returns models grouped by provider."""
+    reg = _populated_registry()
+    srv, port = _start_ui_with_registry(tmp_path, reg)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/models")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert resp.status == 200
+        assert "openrouter" in data
+        assert "nvidia-nim" in data
+        assert len(data["openrouter"]) == 1
+        assert data["openrouter"][0]["id"] == "m1:free"
+        assert data["nvidia-nim"][0]["id"] == "glm-5.2"
+        assert data["nvidia-nim"][0]["reasoning"] is True
+    finally:
+        srv.shutdown()
+
+
+def test_api_providers_get_returns_masked_keys(tmp_path):
+    """GET /api/providers returns masked API keys, not full secrets."""
+    reg = _populated_registry()
+    srv, port = _start_ui_with_registry(tmp_path, reg)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/providers")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert resp.status == 200
+        providers = {p["name"]: p for p in data["providers"]}
+        assert "openrouter" in providers
+        # Key must be masked (shows only first 8 + last 4 chars)
+        masked = providers["openrouter"]["api_key"]
+        assert "..." in masked
+        assert masked.startswith("sk-or-")
+        assert masked.endswith("cdef")
+        assert "1234567890" not in masked  # middle part must be hidden
+    finally:
+        srv.shutdown()
+
+
+def test_api_config_get_returns_current_config(tmp_path):
+    """GET /api/config returns the YAML content of the config file."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("proxy:\n  host: 127.0.0.1\n  port: 9999\n")
+    cfg = Config(config_path=config_path)
+    reg = _populated_registry()
+
+    ui._UIHandler.cfg = cfg
+    ui._UIHandler.reg = reg
+    ui._UIHandler.config_path = cfg.path
+    ui._UIHandler.token = "tok"
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ui._UIHandler)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    time.sleep(0.05)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+        conn.request("GET", "/api/config")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert resp.status == 200
+        assert "proxy:" in data["yaml"]
+        assert "port: 9999" in data["yaml"]
+    finally:
+        srv.shutdown()
+
+
+def test_api_config_post_saves_config(tmp_path):
+    """POST /api/config with valid YAML saves the file."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("proxy:\n  host: 127.0.0.1\n  port: 8337\n")
+    cfg = Config(config_path=config_path)
+    reg = Registry({})
+
+    ui._UIHandler.cfg = cfg
+    ui._UIHandler.reg = reg
+    ui._UIHandler.config_path = cfg.path
+    ui._UIHandler.token = "tok"
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ui._UIHandler)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    time.sleep(0.05)
+    try:
+        new_yaml = "proxy:\n  host: 0.0.0.0\n  port: 8888\nrefresh_interval_hours: 6\n"
+        conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+        conn.request("POST", "/api/config",
+                     body=json.dumps({"yaml": new_yaml}),
+                     headers={"Content-Type": "application/json",
+                              "Authorization": "Bearer tok"})
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert resp.status == 200
+        assert data["ok"] is True
+        # Verify the file was actually written
+        saved = config_path.read_text()
+        assert "port: 8888" in saved
+        assert "refresh_interval_hours: 6" in saved
+    finally:
+        srv.shutdown()
+
+
+def test_api_config_post_rejects_invalid_yaml(tmp_path):
+    """POST /api/config with invalid YAML must be rejected with 400."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("")
+    cfg = Config(config_path=config_path)
+    reg = Registry({})
+
+    ui._UIHandler.cfg = cfg
+    ui._UIHandler.reg = reg
+    ui._UIHandler.config_path = cfg.path
+    ui._UIHandler.token = "tok"
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ui._UIHandler)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    time.sleep(0.05)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+        conn.request("POST", "/api/config",
+                     body=json.dumps({"yaml": "[[invalid: yaml: [}}"}),
+                     headers={"Content-Type": "application/json",
+                              "Authorization": "Bearer tok"})
+        resp = conn.getresponse()
+        assert resp.status == 400
+        resp.read()
+    finally:
+        srv.shutdown()
+
+
+def test_api_providers_post_adds_new_provider(tmp_path):
+    """POST /api/providers with valid data adds a new provider."""
+    reg = _populated_registry()
+    srv, port = _start_ui_with_registry(tmp_path, reg, token="tok")
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("POST", "/api/providers",
+                     body=json.dumps({
+                         "name": "custom-provider",
+                         "base_url": "http://127.0.0.1:8337/v1",
+                         "api_key": "sk-custom",
+                         "models": ["custom-model"],
+                     }),
+                     headers={"Content-Type": "application/json",
+                              "Authorization": "Bearer tok"})
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert resp.status == 200
+        assert data["ok"] is True
+        assert data["provider"] == "custom-provider"
+        # Verify it was actually added
+        assert "custom-provider" in reg.providers
+        assert reg.providers["custom-provider"].effective_key == "sk-custom"
+    finally:
+        srv.shutdown()
+
+
+def test_api_providers_post_rejects_missing_name(tmp_path):
+    """POST /api/providers without a name must be rejected."""
+    reg = _populated_registry()
+    srv, port = _start_ui_with_registry(tmp_path, reg, token="tok")
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("POST", "/api/providers",
+                     body=json.dumps({"base_url": "http://example.com"}),
+                     headers={"Content-Type": "application/json",
+                              "Authorization": "Bearer tok"})
+        resp = conn.getresponse()
+        assert resp.status == 400
+        resp.read()
+    finally:
+        srv.shutdown()
+
+
+def test_api_refresh_works_with_source(tmp_path):
+    """POST /api/refresh with a source triggers a refresh call."""
+    reg = _populated_registry()
+    srv, port = _start_ui_with_registry(tmp_path, reg, token="tok")
+    try:
+        with patch("open_free_router.refresh.refresh") as mock_refresh:
+            mock_refresh.return_value = {"openrouter": False}
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("POST", "/api/refresh",
+                         body=json.dumps({"provider": "openrouter"}),
+                         headers={"Content-Type": "application/json",
+                                  "Authorization": "Bearer tok"})
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            assert resp.status == 200
+            assert data["ok"] is True
+            # refresh was called with the correct provider name
+            mock_refresh.assert_called_once()
+            assert mock_refresh.call_args[1]["provider_name"] == "openrouter"
+    finally:
+        srv.shutdown()
+
+
+def test_api_status_returns_scheduler_status(tmp_path):
+    """GET /api/status reports scheduler status from the shared dict."""
+    reg = _populated_registry()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("proxy:\n  host: 127.0.0.1\n  port: 8337\nui:\n  host: 127.0.0.1\n  port: 0\n")
+    cfg = Config(config_path=config_path)
+
+    ui._UIHandler.cfg = cfg
+    ui._UIHandler.reg = reg
+    ui._UIHandler.config_path = cfg.path
+    ui._UIHandler.token = "tok"
+    ui._UIHandler.scheduler_status = {"last_ok": "2025-01-01T00:00:00", "last_error": None}
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ui._UIHandler)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    time.sleep(0.05)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+        conn.request("GET", "/api/status")
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        assert data["scheduler"]["last_ok"] == "2025-01-01T00:00:00"
+        assert data["scheduler"]["last_error"] is None
+    finally:
+        srv.shutdown()
+
