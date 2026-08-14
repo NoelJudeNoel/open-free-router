@@ -94,13 +94,14 @@ src/open_free_router/
 
 ## Testing
 
-- 164 tests across 17 files (run: `pip install -e ".[dev]" && python3 -m pytest tests/ -v`):
-  - `test_tier_routing.py` (43) — tier pool expansion, priority ordering, context pre-filter, failover/cooldown, upstream path prefix, regression tests for all 9 tier-hardening fixes
+- 212 tests across 19 files (run: `pip install -e ".[dev]" && python3 -m pytest tests/ -v`):
+  - `test_tier_routing.py` (69) — tier pool expansion, priority ordering, context pre-filter, failover/cooldown, upstream path prefix, _normalize suffix stripping, regression tests for all tier-hardening fixes
   - `test_registry.py` (24) — ModelInfo, ProviderConfig, Registry CRUD, proxy index
-  - `test_refresh_sources_new.py` (14) + `test_refresh_sources_second_audit.py` (12) — refresh-source allowlist/parse behavior
+  - `test_ui_auth.py` (18) — token gating of POST endpoints + business logic (status, config, models, providers, refresh)
+  - `test_sync.py` (12) — Pi/OpenCode/Hermes sync, placeholder-key enforcement, stale removal, dispatch
+  - `test_refresh_sources_new.py` (11) + `test_refresh_sources_second_audit.py` (7) — refresh-source allowlist/parse behavior
   - `test_proxy_hardening.py` (9) — body limits, content-length handling, error paths
-  - `test_ui_auth.py` (8) — token gating of POST endpoints (sync paths isolated from real agent configs)
-  - `test_refresh_source_nvidia_nim.py` (8), `test_instance_guard.py` (8), `test_registry_git_history.py` (7), `test_upstream_url_anchoring.py` (5), `test_sync_omp.py` (5), `test_scheduler.py` (5), `test_refresh.py` (4), `test_production_incident_nous_sensenova.py` (4), `test_config.py` (4), `test_streaming.py` (2), `test_serve.py` (2)
+  - `test_instance_guard.py` (8), `test_refresh_source_nvidia_nim.py` (8), `test_registry_git_history.py` (7), `test_refresh_sources_second_audit.py` (7), `test_config.py` (6), `test_cli.py` (6), `test_scheduler.py` (5), `test_sync_omp.py` (5), `test_upstream_url_anchoring.py` (5), `test_refresh.py` (4), `test_production_incident_nous_sensenova.py` (4), `test_streaming.py` (2), `test_serve.py` (2)
 - `tests/e2e_test.py` is a manual live smoke-test script (real API calls + real agent configs) — excluded from `pytest` via `addopts = --ignore=...`; run it directly: `python tests/e2e_test.py`
 - CI: `.github/workflows/tests.yml` runs the suite on Python 3.11 + 3.12
 - Some refresh sources hit live provider APIs and are not covered by CI (network-dependent); verify with `open-free-router refresh --source NAME` when changing them

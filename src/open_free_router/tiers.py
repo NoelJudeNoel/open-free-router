@@ -6,6 +6,17 @@ a single logical model id (e.g. ``glm-5.2``) may exist under several
 providers; a tier collects those logical ids and expands each one into
 its concrete upstream instances, then returns the candidates ordered
 by priority (strongest/best-context first).
+
+---
+
+Suffix normalisation (2026-08-14):
+``_normalize()`` now strips ``:free`` and ``-free`` suffixes from
+upstream_ids so that free-tier variants like
+``stepfun/step-3.7-flash:free`` (Nous) or ``deepseek-v4-flash-free``
+(OpenCode Zen) are recognised as the same logical model as
+``step-3.7-flash`` and ``deepseek-v4-flash``. Without this,
+6 cross-provider failover candidates were silently excluded from their
+tiers and only reachable (out of order) in the low catch-all pool.
 """
 from __future__ import annotations
 
@@ -30,14 +41,10 @@ TIERS: dict[str, list[str]] = {
         "step-3.7-flash",
         "laguna-s-2.1",
         "laguna-xs-2.1",
-        "mimo-v2.5-free",
-        "ling-3.0-flash-free",  # was "ling-3.0-flash" -- matched nothing in the
-                                 # real registry (Zen's actual id has a "-free"
-                                 # suffix; the only other candidate, a Nous
-                                 # manual entry with this bare name, was removed
-                                 # as a confirmed-broken mapping in an earlier
-                                 # fix) -- this tier member silently resolved to
-                                 # zero pool instances with no error or warning.
+        "mimo-v2.5",  # matches "mimo-v2.5-free" via _normalize() suffix stripping
+        # "ling-3.0-flash" was removed: no provider in the registry actually
+        # offers this model, so its tier entry was a silent no-op (zero pool
+        # instances). Re-add it to TIERS["mid"] when/if a provider ships it.
         "nemotron-3-ultra-550b-a55b",
     ],
     # Low: everything else (small / limited-context / fallback)
@@ -128,11 +135,21 @@ class UpstreamInstance:
 def _normalize(uid: str) -> str:
     """Normalize an upstream_id or model id to a comparable bare name.
 
-    Strips a leading ``provider/`` prefix so that e.g.
-    ``minimaxai/minimax-m3`` matches the logical id ``minimax-m3``.
+    - Strips a leading ``provider/`` prefix so that e.g.
+      ``minimaxai/minimax-m3`` matches the logical id ``minimax-m3``.
+    - Strips ``:free`` and ``-free`` suffixes so that free-tier variants
+      like ``stepfun/step-3.7-flash:free`` (Nous) or
+      ``deepseek-v4-flash-free`` (OpenCode Zen) are recognized as the same
+      logical model as ``step-3.7-flash`` and ``deepseek-v4-flash``. Without
+      this, 6 valid cross-provider failover candidates were silently
+      excluded from their tiers and only reachable (out of order) under
+      the low catch-all -- see audit finding on tier classification.
     """
     if "/" in uid:
         uid = uid.rsplit("/", 1)[-1]
+    # All models in this router are free, so the :free / -free markers are
+    # just provider convention noise, not part of the canonical name.
+    uid = uid.removesuffix(":free").removesuffix("-free")
     return uid
 
 

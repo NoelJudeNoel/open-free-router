@@ -107,12 +107,49 @@ def test_high_tier_logical_ids():
 def test_mid_tier_logical_ids():
     assert set(TIERS["mid"]) == {
         "minimax-m3", "step-3.7-flash", "laguna-s-2.1", "laguna-xs-2.1",
-        "mimo-v2.5-free", "ling-3.0-flash-free", "nemotron-3-ultra-550b-a55b",
+        "mimo-v2.5", "nemotron-3-ultra-550b-a55b",
     }
 
 
 def test_low_tier_empty_by_default():
     assert TIERS["low"] == []
+
+
+# normalization: :free and -free suffix stripping
+@pytest.mark.parametrize("uid,expected", [
+    ("stepfun/step-3.7-flash:free", "step-3.7-flash"),
+    ("step-3.7-flash:free", "step-3.7-flash"),
+    ("deepseek-v4-flash-free", "deepseek-v4-flash"),
+    ("poolside/laguna-s-2.1:free", "laguna-s-2.1"),
+    ("z-ai/glm-5.2", "glm-5.2"),
+    ("mimo-v2.5-free", "mimo-v2.5"),
+    ("m1:free", "m1"),
+    ("glm-5.2", "glm-5.2"),
+])
+def test_normalize_strips_suffixes(uid, expected):
+    from open_free_router.tiers import _normalize
+    assert _normalize(uid) == expected, f"{uid} -> {_normalize(uid)} != {expected}"
+
+
+def test_suffix_variants_expand_into_tier_pool(registry):
+    """Free-tier variants with -free suffixes must be matched by their
+    tier"s logical_id, so they are available as failover candidates
+    within the same tier instead of falling through to the low catch-all.
+    The default.yaml template has opencode-zen-free models (with -free
+    suffixes) but not Nous models (auto-refreshed); the Nous :free variant
+    is tested via the same normalization logic in _normalize()."""
+    # high tier: deepseek-v4-flash should match the opencode-zen-free
+    # variant (deepseek-v4-flash-free) via suffix stripping
+    high = tier_members("high", registry)
+    high_keys = {i.key for i in high}
+    assert "opencode-zen-free/deepseek-v4-flash-free" in high_keys, "zen -free variant missing from high -- suffix stripping failed"
+    # mid tier: laguna-s-2.1 should match the opencode-zen-free variant
+    # (laguna-s-2.1-free)
+    mid = tier_members("mid", registry)
+    mid_keys = {i.key for i in mid}
+    assert "opencode-zen-free/laguna-s-2.1-free" in mid_keys, "zen -free variant missing from mid -- suffix stripping failed"
+    # Before the fix, these -free variants were silently excluded from their
+    # tiers and only reachable (out of order) in the low catch-all pool.
 
 
 # pool expansion (incl. fuzzy upstream_id matching)

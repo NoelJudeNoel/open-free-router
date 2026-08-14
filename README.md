@@ -184,7 +184,7 @@ pip install -e ".[dev]"
 python3 -m pytest tests/ -v
 ```
 
-当前 164 个测试覆盖：tier 路由与故障转移、registry CRUD、config 加载、Pi models 写入、proxy index 重建、UI 鉴权、流式转发、单实例守护、allowlist 审计回归等。CI（`.github/workflows/tests.yml`）在 Python 3.11 / 3.12 上跑全量。
+当前 212 个测试覆盖：tier 路由与故障转移（含 `:free`/`-free` 后缀匹配修复）、registry CRUD、config 加载、sync 同步（Pi/OMP/OpenCode/Hermes 占位 key 校验）、proxy index 重建、UI 鉴权与业务逻辑仪表盘、CLI 命令分发、流式转发、单实例守护、allowlist 审计回归等。CI（`.github/workflows/tests.yml`）在 Python 3.11 / 3.12 上跑全量。
 
 ## License
 
