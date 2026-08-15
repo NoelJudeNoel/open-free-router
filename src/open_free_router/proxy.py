@@ -368,6 +368,10 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         for msg in req.get("messages", []):
             if msg.get("role") == "developer":
                 msg["role"] = "system"
+        # Strip agent-specific non-standard fields that upstreams reject
+        # (e.g. Google AI Studio returns 400 on "include_reasoning").
+        for _key in ("include_reasoning", "extra_body", "x_options"):
+            req.pop(_key, None)
         is_stream = endpoint_suffix != "embeddings" and bool(req.get("stream"))
         data = json.dumps(req).encode()
 
