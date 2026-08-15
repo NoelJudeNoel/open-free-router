@@ -369,9 +369,12 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             if msg.get("role") == "developer":
                 msg["role"] = "system"
         # Strip agent-specific non-standard fields that upstreams reject
-        # (e.g. Google AI Studio returns 400 on "include_reasoning" and
-        # "reasoning" -- both are non-OpenAI-spec agent extensions).
-        for _key in ("include_reasoning", "reasoning", "extra_body", "x_options"):
+        # (e.g. Google AI Studio returns 400 on "include_reasoning",
+        # "reasoning", and the openai-SDK defaults "frequency_penalty",
+        # "logit_bias", "seed" -- none are recognized by Google's
+        # OpenAI-compatible endpoint).
+        for _key in ("include_reasoning", "reasoning", "extra_body", "x_options",
+                     "frequency_penalty", "logit_bias", "seed"):
             req.pop(_key, None)
         is_stream = endpoint_suffix != "embeddings" and bool(req.get("stream"))
         data = json.dumps(req).encode()

@@ -86,6 +86,7 @@ src/open_free_router/
   4. provider/upstream_id `nvidia-nim/z-ai/glm-5.2` (OMP format)
 - **Tier routing** — virtual IDs `tier/high|mid|low` expand to an ordered pool of upstream instances (by `_INSTANCE_PRIORITY` then context window), with per-instance retry (1), cooldown (60s, honoring Retry-After), and automatic failover; context-window pre-filter; exhaustion → 429 with last real status. Streaming switches only before first byte. `reset_tier_state()` is wired into `rebuild_proxy_index()` (called by every registry-change path). The tier lists and priority table in `tiers.py` are hand-maintained, not derived from refresh
 - **Internal-key hygiene** — `proxy.py` stashes `_endpoint_path`/`_headers` on the request dict; `upstream._patch_model()` strips `_`-prefixed keys before serializing so routing internals never leak into upstream request bodies
+- **Upstream field sanitization** — before forwarding, both `_patch_model()` (tier path) and the direct model path strip agent/SDK extension fields that strict upstreams (Google AI Studio etc.) reject with HTTP 400: `include_reasoning`, `reasoning`, `extra_body`, `x_options`, `frequency_penalty`, `logit_bias`, `seed`. The openai SDK sends `frequency_penalty` on every request, so without stripping every gemini call via DSH/Pi 400s
 - **Tier observability (per-request trail)** — `TierTrace` dataclass collects the full failover trail for each `tier/*` request: which instances were filtered by context-window, which failed (status/retry_after/ms), which were cooled down, and which ultimately served. The proxy surfaces this via 4 channels: **T0 response headers** (`X-OFR-Trace`/`X-OFR-Tier`/`X-OFR-Served-By`/`X-OFR-Attempts`/`X-OFR-Filtered`/`X-OFR-Cascade`/`X-OFR-Cooldown-Set`/`X-OFR-Request-Context`) — always on, zero body impact, works for streaming (sent before first SSE byte); **T1 failure body** — 429 `error.x_ofr.attempts[]` with full trail; **T2 opt-in debug body** — non-streaming 2xx gets `x_ofr` field when request sends `X-OFR-Debug: true`; **T3 structured log** — `[tier:{trace_id}]` lines correlate with headers. Design principle: "no-feel is default, transparency is opt-in" — automatic failover/cascade is invisible by design, but the black box is openable on demand
 - **Sync** — `open-free-router sync` writes Pi models.json, OMP models.yml (ruamel.yaml round-trip, preserves hand edits), OpenCode opencode.json, and ensures Hermes custom_providers entry from registry; backs up existing configs to `~/.openclaw/agent-backup/`
 - **Sync dedup** — before writing, removes all providers pointing to local proxy (baseURL contains 127.0.0.1/localhost) to prevent duplicate accumulation; Pi always overwrites entire file
@@ -111,6 +112,8 @@ src/open_free_router/
 - Some refresh sources hit live provider APIs and are not covered by CI (network-dependent); verify with `open-free-router refresh --source NAME` when changing them
 
 ## Supported providers (7)
+
+- google-ai-studio serves gemini-3.7-flash / gemini-3.6-flash (1M ctx, 64K output, thinking) / gemini-3.5-flash-lite; free-tier quotas are per-model and tight (generate_content_free_tier_requests limit 20 per window) -- 429 quota is expected under load and tier failover/cascade absorbs it
 
 openrouter, nvidia-nim, opencode-zen-free, sensenova, google-ai-studio, nous, poolside
 

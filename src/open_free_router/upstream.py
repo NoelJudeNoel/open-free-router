@@ -264,8 +264,11 @@ def _patch_model(req: dict[str, Any], inst: UpstreamInstance) -> dict[str, Any]:
     # "reasoning" (OpenAI reasoning-effort extension), "extra_body"
     # (Python SDK meta), and "x_options" (OMP extension) -- these are
     # not in the OpenAI API spec and cause 400 from providers like
-    # Google AI Studio, NVIDIA NIM, etc.
-    for _key in ("include_reasoning", "reasoning", "extra_body", "x_options"):
+    # Google AI Studio, NVIDIA NIM, etc. The openai SDK also sends
+    # "frequency_penalty", "logit_bias", and "seed" by default, which
+    # Google's OpenAI-compatible endpoint rejects with 400.
+    for _key in ("include_reasoning", "reasoning", "extra_body", "x_options",
+                 "frequency_penalty", "logit_bias", "seed"):
         patched.pop(_key, None)
     mm = patched.get("max_tokens")
     if mm is not None and inst.max_tokens and mm > inst.max_tokens:
