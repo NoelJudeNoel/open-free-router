@@ -101,7 +101,8 @@ def test_is_tier_id_false(mid):
 
 # tier mapping contents (design spec)
 def test_high_tier_logical_ids():
-    assert TIERS["high"] == ["glm-5.2", "deepseek-v4-flash", "gemini-3.6-flash"]
+    assert TIERS["high"] == ["glm-5.2", "deepseek-v4-flash",
+                             "gemini-3.7-flash", "gemini-3.6-flash"]
 
 
 def test_mid_tier_logical_ids():

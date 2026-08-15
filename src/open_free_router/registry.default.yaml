@@ -4,8 +4,15 @@ google-ai-studio:
   refresh_method: manual
   api_key: ''
   models:
+  - id: gemini-3.7-flash
+    context_window: 1048576
+    max_tokens: 65536
   - id: gemini-3.6-flash
+    context_window: 1048576
+    max_tokens: 65536
   - id: gemini-3.5-flash-lite
+    context_window: 1048576
+    max_tokens: 65536
   prefix: gai
 nvidia-nim:
   upstream_url: https://integrate.api.nvidia.com/v1
@@ -34,22 +41,6 @@ nous:
   auto_refresh: false
   refresh_method: nous_api
   api_key: ''
-  # Both manual entries previously here (ling-3.0-flash:free ->
-  # inclusionai/ling-3.0-flash:free, step-3.7-flash:free ->
-  # stepfun/step-3.7-flash:free) were removed 2026-08-02: neither was
-  # ever verified against a real, untruncated Nous /v1/models response
-  # (a truncated real response was checked earlier and didn't cover
-  # either ID either way), and the first was confirmed broken via a
-  # real production Hermes session -- Nous's own API returned a live
-  # 404 "Model ... not found" for the resolved upstream_id, meaning our
-  # proxy correctly routed the request but Nous itself rejected it.
-  # Advertising a model as free that 404s on the real upstream is worse
-  # than not listing it at all (a clean 403 "not in whitelist" is a much
-  # better failure mode for the caller than an accepted-then-rejected
-  # round trip). Left empty rather than guess-replaced -- add real
-  # verified entries here once a full /v1/models response from a real
-  # Nous key is available to check against, same process used to fix
-  # stepfun.py/opencode_zen.py's stale entries.
   models: []
   prefix: ns
 poolside:
@@ -57,16 +48,6 @@ poolside:
   auto_refresh: true
   refresh_method: poolside_api
   api_key: ''
-  # Local ids renamed 2026-08-02 from laguna-s:free/laguna-xs:free/
-  # laguna-m:free to the models' real names. The invented ":free" suffix
-  # didn't match anything a user would actually see -- Poolside's own
-  # docs (docs.poolside.ai/api/overview, poolside.ai/models) show curl/
-  # Python examples using "poolside/laguna-s-2.1" directly against their
-  # own API, so a user copying from Poolside's own documentation would
-  # never guess ":free". upstream_id (the "poolside/..." prefixed form)
-  # was separately confirmed correct via the same official docs -- that
-  # part was NOT broken, despite initially looking similar to the SenseNova/
-  # Nous issues; only the local display id needed fixing here.
   models:
   - id: laguna-s-2.1
     upstream_id: poolside/laguna-s-2.1
@@ -123,24 +104,6 @@ sensenova:
   refresh_method: sensenova_api
   api_key: ''
   models:
-  # Renamed from local short-id "v4-flash" to match SenseNova's own
-  # real model name exactly (confirmed via a real /v1/models response
-  # earlier: SenseNova's own catalog calls this "deepseek-v4-flash",
-  # not "v4-flash") -- id == upstream_id now, so upstream_id is dropped
-  # rather than kept as a redundant duplicate. The previous short-id
-  # was gratuitous local renaming with no real benefit and cost a real
-  # user a failed request in production: they reasonably guessed the
-  # display name would match the model's actual name
-  # ("nova/deepseek-v4-flash") and got a 403 because our registry only
-  # recognized "nova/v4-flash".
-  #
-  # context_window/max_tokens added 2026-08-0x: previously omitted, so
-  # both models silently fell back to ModelInfo's defaults (131072 /
-  # 8192) instead of their real values -- harmless for basic routing,
-  # but this directly undermined the tier-routing feature's context-
-  # aware prioritization (a 1M-context model losing to a 128k one in
-  # sort order because its context_window was never actually recorded).
-  # Values are from the same real /v1/models response referenced above.
   - id: deepseek-v4-flash
     context_window: 1048576
     max_tokens: 65536

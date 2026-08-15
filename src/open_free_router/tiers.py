@@ -41,6 +41,7 @@ TIERS: dict[str, list[str]] = {
     "high": [
         "glm-5.2",
         "deepseek-v4-flash",
+        "gemini-3.7-flash",
         "gemini-3.6-flash",
     ],
     # Mid: strong models, ~256k-512k context or solid coding/reasoning
