@@ -111,3 +111,21 @@ sensenova:
     context_window: 1048576
     max_tokens: 131072
   prefix: nova
+teamorouter:
+  base_url: ''
+  upstream_url: https://api.teamorouter.com/v1
+  api_key: ''
+  prefix: to
+  auto_refresh: false
+  refresh_method: manual
+  models:
+  - id: deepseek-v4-flash-free
+    name: DeepSeek V4 Flash Free
+    context_window: 131072
+    max_tokens: 16384
+    reasoning: true
+  - id: deepseek-v4-pro-free
+    name: DeepSeek V4 Pro Free
+    context_window: 131072
+    max_tokens: 16384
+    reasoning: true

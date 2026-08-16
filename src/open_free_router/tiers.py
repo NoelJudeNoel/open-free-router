@@ -54,6 +54,7 @@ TIERS: dict[str, list[str]] = {
         # "ling-3.0-flash" was removed: no provider in the registry actually
         # offers this model, so its tier entry was a silent no-op (zero pool
         # instances). Re-add it to TIERS["mid"] when/if a provider ships it.
+        "deepseek-v4-pro",
         "nemotron-3-ultra-550b-a55b",
     ],
     # Low: everything else (small / limited-context / fallback)
@@ -106,6 +107,8 @@ _INSTANCE_PRIORITY: dict[tuple[str, str], int] = {
     ("deepseek-v4-flash", "sensenova"): 0,
     ("deepseek-v4-flash", "nvidia-nim"): 1,
     ("deepseek-v4-flash", "opencode-zen-free"): 2,
+    ("deepseek-v4-flash", "teamorouter"): 3,
+    ("deepseek-v4-pro", "teamorouter"): 0,
     ("nemotron-3-ultra-550b-a55b", "openrouter"): 0,   # 1M
     ("nemotron-3-ultra-550b-a55b", "nvidia-nim"): 1,   # 1M (nemotron reasoning)
     ("nemotron-3-ultra-550b-a55b", "opencode-zen-free"): 2,

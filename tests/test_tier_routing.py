@@ -108,7 +108,7 @@ def test_high_tier_logical_ids():
 def test_mid_tier_logical_ids():
     assert set(TIERS["mid"]) == {
         "minimax-m3", "step-3.7-flash", "laguna-s-2.1", "laguna-xs-2.1",
-        "mimo-v2.5", "nemotron-3-ultra-550b-a55b",
+        "mimo-v2.5", "deepseek-v4-pro", "nemotron-3-ultra-550b-a55b",
     }
 
 
