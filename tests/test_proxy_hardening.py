@@ -271,6 +271,28 @@ class TestBodySizeLimit:
             proxy_srv.shutdown()
             upstream.shutdown()
 
+    def test_unquoted_json_body_repaired_and_forwarded(self):
+        """Lenient clients (observed: DSH chat path via pi-ai) send
+        key:value JSON without quotes; the proxy must repair it instead
+        of returning 400 invalid json (which pi-ai misreports as a
+        context-window overflow)."""
+        upstream = _start(_EchoUpstreamHandler)
+        proxy_srv, _ = _proxy_for(upstream.server_address[1])
+        try:
+            sock_conn = http.client.HTTPConnection("127.0.0.1", proxy_srv.server_address[1], timeout=5)
+            sock_conn.putrequest("POST", "/v1/chat/completions", skip_host=True, skip_accept_encoding=True)
+            body = b"{model:m1,messages:[{role:user,content:hi}],max_tokens:50}"
+            sock_conn.putheader("Content-Type", "application/json")
+            sock_conn.putheader("Content-Length", str(len(body)))
+            sock_conn.endheaders()
+            sock_conn.send(body)
+            resp = sock_conn.getresponse()
+            assert resp.status == 200, f"unquoted json rejected: {resp.status}"
+            resp.read()
+        finally:
+            proxy_srv.shutdown()
+            upstream.shutdown()
+
 
 class TestHealthz:
     def test_healthz_returns_ok_with_registry(self):

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import socket
 import threading
 import uuid
@@ -264,8 +265,18 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         try:
             req = json.loads(body)
         except json.JSONDecodeError:
-            self._send_json(400, {"error": "invalid json"})
-            return
+            # Lenient fallback: some clients (observed: DSH chat path via
+            # pi-ai) send key:value JSON without quotes, e.g.
+            #   {model:gai/gemini-3.5-flash-lite,messages:[{role:user,content:hi}],max_tokens:50}
+            # Standard json.loads rejects it, and the 400 was being
+            # misreported by pi-ai as a context-window overflow. Repair
+            # bare keys/values before giving up.
+            repaired = _repair_bare_json(body)
+            if repaired is not None:
+                req = repaired
+            else:
+                self._send_json(400, {"error": "invalid json"})
+                return
 
         model_id = req.get("model", "")
         provider_name = self._find_provider(model_id)
@@ -589,3 +600,22 @@ def rebuild_proxy_index():
     target = _ACTIVE_HANDLER or _ProxyHandler
     target.rebuild_index()
     reset_tier_state()
+
+def _repair_bare_json(s: str) -> dict | None:
+    """Best-effort repair of unquoted key:value JSON (lenient clients)."""
+    if not s or not s.lstrip().startswith("{"):
+        return None
+    fixed = s
+    # quote bare object keys: {key: or ,key: or [key:
+    fixed = re.sub(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_-]*)(\s*:)",
+                   r'\1"\2"\3', fixed)
+    # quote bare string values (identifier-like, incl / - . _)
+    fixed = re.sub(r"(:\s*)([A-Za-z_][A-Za-z0-9_./-]*)(?=\s*[,}\] ])",
+                   r'\1"\2"', fixed)
+    fixed = re.sub(r"([,\[ ]\s*)([A-Za-z_][A-Za-z0-9_./-]*)(?=\s*[,}\] ])",
+                   r'\1"\2"', fixed)
+    try:
+        obj = json.loads(fixed)
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        return None
