@@ -159,6 +159,26 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
             return
 
+        # The openai SDK switches to chunked transfer-encoding for large
+        # request bodies (big conversation histories). Python's
+        # BaseHTTPRequestHandler doesn't decode chunked request bodies and
+        # would reply with a bare "400 Bad Request" (no body), which agents
+        # like DSH/Pi then misreport as a context-window overflow. Decode
+        # chunked bodies here so big tier/gemini requests work.
+        if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
+            try:
+                body = self._read_chunked_body()
+            except (ValueError, ConnectionError) as e:
+                self._send_json(400, {"error": f"invalid chunked body: {e}"})
+                self.close_connection = True
+                return
+            if len(body) > self.MAX_BODY_BYTES:
+                self._send_json(413, {"error": f"request body too large (> {self.MAX_BODY_BYTES} bytes)"})
+                self.close_connection = True
+                return
+            self._forward_request(upstream_suffix, body.decode("utf-8", errors="replace"))
+            return
+
         length_header = self.headers.get("Content-Length")
         try:
             length = int(length_header) if length_header is not None else None
@@ -174,6 +194,41 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
         body = self.rfile.read(length).decode("utf-8", errors="replace")
         self._forward_request(upstream_suffix, body)
+
+    def _read_chunked_body(self) -> bytes:
+        """Read a chunked transfer-encoding request body per RFC 7230.
+
+        Each chunk is '<hex-size>\r\n<data>\r\n', terminated by a
+        0-size chunk followed by optional trailers. Returns the
+        concatenated payload. Raises ValueError on malformed framing.
+        """
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            line = self.rfile.readline(4096)
+            if not line:
+                raise ConnectionError("connection closed mid-chunked-body")
+            size_str = line.strip().split(b";")[0]
+            try:
+                size = int(size_str, 16)
+            except ValueError:
+                raise ValueError(f"bad chunk size: {size_str!r}")
+            if size == 0:
+                # consume trailer section (empty line terminates)
+                while True:
+                    t = self.rfile.readline(4096)
+                    if not t or t in (b"\r\n", b"\n"):
+                        break
+                break
+            total += size
+            if total > self.MAX_BODY_BYTES:
+                raise ValueError("body too large")
+            data = self.rfile.read(size)
+            if len(data) != size:
+                raise ConnectionError("short chunk read")
+            self.rfile.readline(4096)  # trailing CRLF
+            chunks.append(data)
+        return b"".join(chunks)
 
     def _handle_list_models(self):
         if not self.registry:

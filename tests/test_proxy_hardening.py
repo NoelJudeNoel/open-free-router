@@ -220,6 +220,57 @@ class TestBodySizeLimit:
             proxy_srv.shutdown()
             upstream.shutdown()
 
+    def test_chunked_request_body_decoded_and_forwarded(self):
+        """Chunked transfer-encoding bodies (used by the openai SDK for
+        large conversation histories) must be decoded, not rejected with
+        a bare 400 (which agents misreport as context-window overflow)."""
+        upstream = _start(_EchoUpstreamHandler)
+        proxy_srv, _ = _proxy_for(upstream.server_address[1])
+        try:
+            payload = json.dumps({
+                "model": "m1",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 50,
+            })
+            sock_conn = http.client.HTTPConnection("127.0.0.1", proxy_srv.server_address[1], timeout=5)
+            sock_conn.putrequest("POST", "/v1/chat/completions", skip_host=True, skip_accept_encoding=True)
+            sock_conn.putheader("Content-Type", "application/json")
+            sock_conn.putheader("Transfer-Encoding", "chunked")
+            sock_conn.endheaders()
+            data = payload.encode()
+            crlf = "\r\n"
+            for i in range(0, len(data), 64):
+                c = data[i:i + 64]
+                sock_conn.send(("%x" % len(c) + crlf).encode() + c + crlf.encode())
+            sock_conn.send(b"0" + crlf.encode() + crlf.encode())
+            resp = sock_conn.getresponse()
+            assert resp.status == 200, f"chunked request rejected: {resp.status}"
+            body = resp.read().decode()
+            # echo upstream returns the path it was hit on; verify the chunked body decoded and routed
+            assert "chat/completions" in body
+        finally:
+            proxy_srv.shutdown()
+            upstream.shutdown()
+
+    def test_malformed_chunked_body_rejected_400(self):
+        upstream = _start(_EchoUpstreamHandler)
+        proxy_srv, _ = _proxy_for(upstream.server_address[1])
+        try:
+            sock_conn = http.client.HTTPConnection("127.0.0.1", proxy_srv.server_address[1], timeout=5)
+            sock_conn.putrequest("POST", "/v1/chat/completions", skip_host=True, skip_accept_encoding=True)
+            sock_conn.putheader("Content-Type", "application/json")
+            sock_conn.putheader("Transfer-Encoding", "chunked")
+            sock_conn.endheaders()
+            crlf2 = "\r\n"
+            sock_conn.send(b"ZZZ" + crlf2.encode())  # invalid chunk size
+            sock_conn.send(b"0" + crlf2.encode() + crlf2.encode())
+            resp = sock_conn.getresponse()
+            assert resp.status == 400
+            resp.read()
+        finally:
+            proxy_srv.shutdown()
+            upstream.shutdown()
+
 
 class TestHealthz:
     def test_healthz_returns_ok_with_registry(self):
