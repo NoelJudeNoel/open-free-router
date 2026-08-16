@@ -58,6 +58,11 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                         provider_prefixed = f"{name}/{uid}"
                         if provider_prefixed not in idx:
                             idx[provider_prefixed] = name
+                        # also register prefix/upstream_id (e.g. nv/z-ai/glm-5.2)
+                        # so agents that use the short channel prefix work
+                        prefix_uid = f"{prefix}/{uid}"
+                        if prefix_uid not in idx:
+                            idx[prefix_uid] = name
         with cls._index_lock:
             cls._model_index = idx
 
@@ -423,9 +428,11 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 #   provider/upstream_id (e.g. nvidia-nim/z-ai/glm-5.2)  ← OMP format
                 display = f"{p.model_prefix}/{m.id}"
                 prov_upstream = f"{p.name}/{m.effective_upstream_id}"
+                prefix_uid = f"{p.model_prefix}/{m.effective_upstream_id}"
                 if (display == model_id or m.id == model_id
                         or m.effective_upstream_id == model_id
-                        or prov_upstream == model_id):
+                        or prov_upstream == model_id
+                        or prefix_uid == model_id):
                     upstream_model_id = m.effective_upstream_id
                     break
         req["model"] = upstream_model_id
