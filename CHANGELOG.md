@@ -43,6 +43,10 @@ field-sanitization for the OpenAI SDK).
   defaults frequency_penalty, logit_bias, seed (Google's OpenAI-
   compatible endpoint rejects these; openai SDK sends frequency_penalty
   on every request, so any gemini call via DSH/Pi used to 400).
+- **Chunked request bodies decoded**: the openai SDK switches to Transfer-Encoding: chunked for large conversation histories; Python http.server used to reject those with a bare 400 (no body), which agents (DSH/Pi) misreport as CONTEXT_WINDOW_EXCEEDED. The proxy now decodes chunked bodies (RFC 7230).
+- **Lenient JSON repair**: some clients send key:value JSON without quotes (e.g. {model:gai/...,messages:[...]}); the proxy repairs and forwards these instead of 400 invalid json.
+- **OpenAI SDK 6.26 defaults stripped**: store, metadata, logprobs (plus frequency_penalty, logit_bias, seed, reasoning, include_reasoning, extra_body, x_options) are removed before forwarding - Google rejects them with 400.
+- **prefix/upstream_id model format**: nv/z-ai/glm-5.2 and similar (short channel prefix + upstream_id) now match and forward correctly (previously left un-rewritten, causing upstream 404).
 - Streaming trace: ms timing and status no longer raise
   UnboundLocalError on the success path.
 - X-OFR-Debug opt-in body now uses safe header access (no
