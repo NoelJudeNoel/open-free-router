@@ -440,7 +440,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         # "logit_bias", "seed" -- none are recognized by Google's
         # OpenAI-compatible endpoint).
         for _key in ("include_reasoning", "reasoning", "extra_body", "x_options",
-                     "frequency_penalty", "logit_bias", "seed"):
+                     "frequency_penalty", "logit_bias", "seed",
+                     "store", "metadata", "logprobs"):
             req.pop(_key, None)
         is_stream = endpoint_suffix != "embeddings" and bool(req.get("stream"))
         data = json.dumps(req).encode()

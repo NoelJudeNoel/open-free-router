@@ -268,7 +268,8 @@ def _patch_model(req: dict[str, Any], inst: UpstreamInstance) -> dict[str, Any]:
     # "frequency_penalty", "logit_bias", and "seed" by default, which
     # Google's OpenAI-compatible endpoint rejects with 400.
     for _key in ("include_reasoning", "reasoning", "extra_body", "x_options",
-                 "frequency_penalty", "logit_bias", "seed"):
+                 "frequency_penalty", "logit_bias", "seed",
+                 "store", "metadata", "logprobs"):
         patched.pop(_key, None)
     mm = patched.get("max_tokens")
     if mm is not None and inst.max_tokens and mm > inst.max_tokens:
