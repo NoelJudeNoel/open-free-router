@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Dict
 
 from open_free_router.registry import Registry
+from open_free_router.probe import verify_models
 
 from open_free_router.refresh_sources import (
     openrouter,
@@ -14,6 +15,7 @@ from open_free_router.refresh_sources import (
     nous,
     sensenova,
     opencode_zen,
+    ant_ling,
 )
 
 # Map registry provider name -> refresh source module
@@ -25,6 +27,7 @@ SOURCE_MAP = {
     "nous": nous,
     "sensenova": sensenova,
     "opencode-zen-free": opencode_zen,
+    "ant-ling": ant_ling,
 }
 
 
@@ -59,8 +62,16 @@ def _load_canonical_upstream_urls() -> Dict[str, str]:
 CANONICAL_UPSTREAM_URLS: Dict[str, str] = _load_canonical_upstream_urls()
 
 
-def refresh(reg: Registry, provider_name: str | None = None) -> Dict[str, bool]:
+def refresh(reg: Registry, provider_name: str | None = None, verify: bool = True) -> Dict[str, bool]:
     """Refresh one or all providers' model lists.
+
+    When `verify` is true (default), every model a source returns is then
+    live-verified with one minimal chat completion (probe.verify_models)
+    before it may enter the registry -- a /v1/models listing alone has
+    repeatedly proven insufficient (2026-09-02 audit: NVIDIA NIM listed 54
+    chat models, only 9 answered; two of SenseNova's free entries 404'd).
+    See probe.py for the verdict rules and the batch guards that keep a
+    key-expiry or network outage from wiping the registry.
 
     Returns a dict of provider name -> **did this provider's model list
     actually change**. This is deliberately *not* "did the fetch succeed" —
@@ -99,6 +110,20 @@ def refresh(reg: Registry, provider_name: str | None = None) -> Dict[str, bool]:
             continue
 
         current_ids = [m.id for m in p.models]
+
+        if verify:
+            new_models, _probe_results = verify_models(
+                name, p.upstream_url or p.base_url, p.effective_key, new_models)
+            if not new_models:
+                # Every candidate failed the live probe. Never wipe a
+                # provider's list on a unanimous probe failure -- that
+                # pattern is what a rotated key / upstream outage looks
+                # like, not what a dead model looks like.
+                print(f"  ⚠ {name}: all {len(current_ids)} models failed probe "
+                      f"-- keeping existing list")
+                results[name] = False
+                continue
+
         new_ids = [m.id for m in new_models]
         changed = current_ids != new_ids
         if changed:

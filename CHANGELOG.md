@@ -4,6 +4,66 @@ All notable changes to open-free-router are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [0.3.0] - 2026-09-02
+
+Probe-then-trust release: refresh no longer trusts /v1/models listings
+blindly. Born from the 2026-09-02 audit that found NVIDIA NIM listing 54
+chat-capable models of which only 9 answered a real request -- including
+production entry `moonshotai/kimi-k2.6`, which 404'd ("Function not
+found") while sitting in the registry as healthy.
+
+### Added
+- **Live model verification (`probe.py`)** — after each source's
+  structural free-detection, every candidate model now receives one
+  minimal real chat completion (`"Say pong"`, max_tokens=16) before it
+  may enter the registry. Verdicts: 200 → verified; 429/5xx → alive
+  (kept — tier failover absorbs saturation); 400/404 → dead (400 gets
+  one fuller-payload retry first, strict upstreams reject tiny
+  max_tokens); 401/403 → auth; network errors → inconclusive (kept,
+  conservatively). Batch guards: all-auth/all-inconclusive keeps the old
+  list (a rotated key must never wipe the registry), and a run of 5
+  consecutive timeouts trips a circuit breaker so a hung upstream can't
+  stall a whole refresh cycle.
+- **`verify_models` config knob** (default on) and
+  `open-free-router refresh --skip-verify` to opt out per invocation.
+- **Kimi K3 in tier/high** — all collected K3 instances pool into the
+  high tier with priority order sensenova → nvidia-nim → leuai.
+- **NIM funnel redesign** — the 7-entry KNOWN_FREE allowlist is retired
+  (it was stale in both directions: listed 3 models absent from the live
+  catalog, blocked newer live ones). Detection is now "live catalog
+  minus non-chat endpoints" (embed/rerank/guard/vision/riva/reward/
+  video/parse/cosmos blocklist); usability is probe's job.
+
+### Changed
+- **registry.default.yaml** refreshed to the 2026-09-02 verified NIM
+  catalog snapshot (deepseek-v4-flash/-pro dated builds, kimi-k3,
+  nemotron-3.5-lightning/super/nano-omni, gpt-oss-120b/20b, gemma-4-31b,
+  muse-glimmer-30b, diffusiongemma-26b-a4b-it, laguna-xs-2.1; removed
+  kimi-k2.6 (404-dead), step-3.7-flash / glm-5.2 / mistral-medium-3.5
+  (no longer listed)); Zen bootstrap list synced to the live free
+  catalog; sensenova template gains deepseek-v4-pro + kimi-k3.
+- **TIERS["mid"] drops `step-3.7-flash`** — its last free sources are
+  gone (NIM no longer lists it; Nous' copy 400s "missing tags" on every
+  chat payload shape).
+
+- **Ant Group Ling refresh source (`ant-ling`)** — pluggable fetch() for
+  Ant's Ling API (Ling-3.0-flash), completing the SOURCE_MAP entry that
+  registry configs already referenced.
+
+### Fixed
+- **google-ai-studio fetch never worked (401)** — native v1beta REST
+  rejects Bearer auth; switched to `x-goog-api-key`. Masked until now by
+  `auto_refresh: false` in every shipped config. KNOWN_FREE also gains
+  gemini-3.7-flash so a successful refresh no longer washes it out.
+- **proxy: clamp `max_tokens` to the concrete model's registered cap** —
+  agents (Hermes/OMP/OpenCode) can send max_tokens far above the real
+  upstream limit on length-continuation retries (e.g. 32768 to Groq),
+  which 400s deterministically. The tier path already clamped via
+  `_patch_model()`; the direct concrete-model path now does too.
+- **teamorouter / bearlab removed from upstream config** (2026-09-02):
+  teamo wallet empty (all models 400), bearlab token invalid (401);
+  template no longer bootstraps teamorouter.
+
 ## [0.2.0] - 2026-08-16
 
 Tier observability release: per-request failover trails surfaced across

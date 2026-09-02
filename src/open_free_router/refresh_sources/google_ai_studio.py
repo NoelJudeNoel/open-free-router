@@ -57,6 +57,7 @@ SOURCE_NAME = "google-ai-studio"
 # caught by periodic manual research like this, not by any live API
 # check even with a real key.
 KNOWN_FREE = [
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
     "gemma-3-27b-it",
@@ -69,10 +70,15 @@ def fetch(provider_base_url: str, api_key: str | None = None) -> List[ModelInfo]
 
     models: List[ModelInfo] = []
     try:
-        # Gemini API list models
+        # Gemini API list models. The native v1beta REST surface
+        # authenticates via x-goog-api-key (or ?key=) ONLY -- a Bearer
+        # header gets 401. Bearer is valid on the /openai chat-compat
+        # surface (which probe.py uses), but not here. Fixed 2026-09-02:
+        # with Bearer-only headers this source had never once succeeded,
+        # masked by auto_refresh=false in every shipped config.
         r = requests.get(
             f"{provider_base_url}/models",
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"x-goog-api-key": api_key, "User-Agent": "open-free-router/0.1"},
             timeout=60,
         )
         r.raise_for_status()

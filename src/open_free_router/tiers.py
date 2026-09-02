@@ -41,13 +41,19 @@ TIERS: dict[str, list[str]] = {
     "high": [
         "glm-5.2",
         "deepseek-v4-flash",
+        "kimi-k3",  # 2026-09-02: sensenova (429-saturated but alive), NIM
+        # (catalog-listed), leuai (manual) -- all K3 instances pool here.
         "gemini-3.7-flash",
         "gemini-3.6-flash",
     ],
     # Mid: strong models, ~256k-512k context or solid coding/reasoning
     "mid": [
         "minimax-m3",
-        "step-3.7-flash",
+        # "step-3.7-flash" removed 2026-09-02: its last free sources are
+        # gone -- NVIDIA NIM no longer lists stepfun-ai/step-3.7-flash at
+        # all, and Nous' stepfun/step-3.7-flash:free 400s ("missing tags")
+        # on every chat-completions payload shape we speak. Re-add when a
+        # provider actually serves it again.
         "laguna-s-2.1",
         "laguna-xs-2.1",
         "mimo-v2.5",  # matches "mimo-v2.5-free" via _normalize() suffix stripping
@@ -109,6 +115,9 @@ _INSTANCE_PRIORITY: dict[tuple[str, str], int] = {
     ("deepseek-v4-flash", "opencode-zen-free"): 2,
     ("deepseek-v4-flash", "teamorouter"): 3,
     ("deepseek-v4-pro", "teamorouter"): 0,
+    ("kimi-k3", "sensenova"): 0,                       # alive 2026-09-02 (429-saturated)
+    ("kimi-k3", "nvidia-nim"): 1,                      # catalog-listed 2026-09-02
+    ("kimi-k3", "leuai"): 2,                           # manual provider, currently slow
     ("nemotron-3-ultra-550b-a55b", "openrouter"): 0,   # 1M
     ("nemotron-3-ultra-550b-a55b", "nvidia-nim"): 1,   # 1M (nemotron reasoning)
     ("nemotron-3-ultra-550b-a55b", "opencode-zen-free"): 2,

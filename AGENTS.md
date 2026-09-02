@@ -14,7 +14,7 @@
 | `open-free-router serve` | **★ One command:** proxy(8337) + UI(9057) + scheduler (configurable interval, default 12h). Single-instance guarded (pidfile+flock + port probe) |
 | `open-free-router ui` | Web dashboard standalone |
 | `open-free-router setup` | Interactive wizard: fill in API keys for all providers |
-| `open-free-router refresh [--source NAME] [--dry-run]` | Poll provider APIs for free model changes; on a real (non-dry-run) change, saves registry.yaml and sends SIGUSR1 to the running daemon so it hot-reloads — no restart needed |
+| `open-free-router refresh [--source NAME] [--dry-run] [--skip-verify]` | Poll provider APIs for free model changes, then live-probe every candidate (one minimal chat completion each, via `probe.py`); on a real (non-dry-run) change, saves registry.yaml and sends SIGUSR1 to the running daemon so it hot-reloads — no restart needed |
 | `open-free-router add NAME --base-url URL [--upstream-url URL] [--model ID] [--auto-refresh]` | Add a provider to registry |
 | `open-free-router sync [--agent pi,omp,opencode,hermes] [--diff]` | Sync registry to Pi/OMP/OpenCode/Hermes configs |
 
@@ -32,7 +32,7 @@
 
 ## Bootstrap
 
-- `src/open_free_router/registry.default.yaml` — template with 9 upstream sources and model lists, no API keys
+- `src/open_free_router/registry.default.yaml` — template with 8 upstream sources and model lists, no API keys (teamorouter/bearlab removed 2026-09-02: teamo wallet empty, bearlab token invalid)
 - `scripts/install.sh` — one-liner installer (git clone + venv + setup). `--with-systemd` for systemd auto-start
 - `contrib/systemd/open-free-router.service` — systemd service unit (auto-restart on failure)
 - First `serve` auto-bootstraps config + registry; `open-free-router setup` walks through key entry interactively
@@ -46,11 +46,12 @@ src/open_free_router/
 ├── cli.py                # argparser → routes to serve/ui/refresh/add/sync/setup
 ├── config.py             # Config class: loads config.yaml, resolves paths
 ├── registry.py           # Registry CRUD: ProviderConfig + ModelInfo dataclasses, .bak pruning, optional git history
-├── registry.default.yaml # Template with 9 upstream sources, no API keys
+├── registry.default.yaml # Template with 8 upstream sources, no API keys
 ├── proxy.py              # Single-port proxy (8337), routes by model ID + tier IDs to upstream
 ├── tiers.py              # Tier routing: tier/high|mid|low → ordered pool of upstream instances, _INSTANCE_PRIORITY
 ├── upstream.py           # Tier forwarding driver: retry/cooldown/failover policy, TierExhaustedError, streaming
 ├── refresh.py            # Dispatches per-provider refresh; SOURCE_MAP + CANONICAL_UPSTREAM_URLS (for pinning)
+├── probe.py              # Live usability verification: one minimal chat completion per candidate model, verdict rules + batch guards
 ├── refresh_sources/      # Pluggable fetch() per provider: openrouter, nvidia_nim, opencode_zen, sensenova, google_ai_studio, nous, poolside
 ├── serve.py              # Daemon: proxy + UI + scheduler + Pi models.json writer
 ├── sync.py               # Sync registry to Pi/OMP/OpenCode/Hermes configs (dedup-aware, ruamel for OMP)
@@ -69,6 +70,7 @@ src/open_free_router/
 - **Timeout** — upstream timeout is 120s (configurable via `upstream_timeout` in config.yaml)
 - **Zero web framework** — uses stdlib `http.server`; no Flask/FastAPI/uvicorn
 - **Refresh sources** are pluggable modules. Each must export `fetch(upstream_url, api_key) -> list[ModelInfo]`. `refresh()` returns *did the list actually change* — callers gate writes on `any(results.values())` so no-op cycles don't rewrite backups/sync files
+- **Probe-then-trust (probe.py, 2026-09-02)** — a `/v1/models` listing is necessary but not sufficient: NIM's catalog once listed 54 chat models of which only 9 answered (incl. production entry `moonshotai/kimi-k2.6`, which 404'd while sitting in the registry as healthy). After each source's structural free-detection, refresh() live-probes every candidate with one minimal chat completion. Verdicts: 200 → keep; 429/5xx → keep (alive, saturated); 400/404 → drop (400 gets one fuller-payload retry first); 401/403 → auth; network errors → keep (inconclusive). Batch guards: all-auth/all-inconclusive keeps the old list (a rotated key must never wipe the registry); 5 consecutive timeouts trip a circuit breaker. Config knob `verify_models` (default on), CLI override `--skip-verify`. The probe uses `<upstream_url>/chat/completions` except google-ai-studio, which uses the `/openai/` chat-compat surface (native v1beta REST rejects Bearer auth — that 401 bug masked a never-working gai fetch until 2026-09-02)
 - **upstream_url pinning** — for built-in providers (in `SOURCE_MAP`), `upstream_url` is pinned to the canonical value from `registry.default.yaml`; submitted overrides are ignored (response flags `upstream_url_pinned`). Custom providers keep full freedom
 - **Pi models.json** written by `serve.py` on startup and after each refresh, and by `ui.py` on changes. Format: `{providers: {name: {baseUrl, models: [...]}}}`. All providers point to local proxy; routing is by model ID
 - **Scheduler interval** configurable via `config.yaml: refresh_interval_hours` (default 12)
@@ -98,15 +100,16 @@ src/open_free_router/
 
 ## Testing
 
-- 238 tests across 20 files (run: `pip install -e ".[dev]" && python3 -m pytest tests/ -v`):
+- 267 tests across 21 files (run: `pip install -e ".[dev]" && python3 -m pytest tests/ -v`):
   - `test_tier_routing.py` (77) — tier pool expansion, priority ordering, context pre-filter, failover/cooldown, upstream path prefix, _normalize suffix stripping, regression tests for all tier-hardening fixes, TierTrace per-request trail (filtered/error/ok attempts, cascade path, cooldowns set, served_by)
   - `test_registry.py` (24) — ModelInfo, ProviderConfig, Registry CRUD, proxy index
   - `test_ui_auth.py` (20) — token gating of POST endpoints + business logic (status, config, models, providers, refresh, /api/health)
+  - `test_probe.py` (19) — probe verdict buckets (200/429/5xx/400/404/401/403/timeout), 400 fuller-payload retry, all-auth/all-inconclusive keep-all guards, timeout circuit breaker, google-ai-studio chat-path override, upstream_id probing for dated builds
   - `test_sync.py` (12) — Pi/OpenCode/Hermes sync, placeholder-key enforcement, stale removal, dispatch
   - `test_refresh_sources_new.py` (11) + `test_refresh_sources_second_audit.py` (7) — refresh-source allowlist/parse behavior
   - `test_proxy_hardening.py` (13) — body limits, content-length handling, error paths, /healthz, tier observability (X-OFR headers, opt-in x_ofr body)
   - `test_hot_reload.py` (9) — daemon registry hot-reload (watchdog + SIGUSR1), CLI daemon notify
-  - `test_instance_guard.py` (8), `test_refresh_source_nvidia_nim.py` (10), `test_registry_git_history.py` (7), `test_refresh_sources_second_audit.py` (7), `test_config.py` (6), `test_cli.py` (6), `test_scheduler.py` (6), `test_sync_omp.py` (5), `test_upstream_url_anchoring.py` (5), `test_refresh.py` (4), `test_production_incident_nous_sensenova.py` (4), `test_streaming.py` (2), `test_serve.py` (2)
+  - `test_instance_guard.py` (8), `test_refresh_source_nvidia_nim.py` (10), `test_registry_git_history.py` (7), `test_refresh_sources_second_audit.py` (7), `test_config.py` (6), `test_cli.py` (6), `test_scheduler.py` (6), `test_sync_omp.py` (5), `test_upstream_url_anchoring.py` (5), `test_refresh.py` (7), `test_production_incident_nous_sensenova.py` (4), `test_streaming.py` (2), `test_serve.py` (2)
 - `tests/e2e_test.py` is a manual live smoke-test script (real API calls + real agent configs) — excluded from `pytest` via `addopts = --ignore=...`; run it directly: `python tests/e2e_test.py`
 - CI: `.github/workflows/tests.yml` runs the suite on Python 3.11 + 3.12 + 3.13
 - Some refresh sources hit live provider APIs and are not covered by CI (network-dependent); verify with `open-free-router refresh --source NAME` when changing them
@@ -118,8 +121,9 @@ src/open_free_router/
 openrouter, nvidia-nim, opencode-zen-free, sensenova, google-ai-studio, nous, poolside
 
 - DeepSeek was removed as a direct provider (2026-07): its models are reached via NVIDIA NIM / SenseNova instead
-- Groq and StepFun were removed as direct providers (2026-08): StepFun's model is still reachable via NVIDIA NIM's own separately-hosted copy (`stepfun-ai/step-3.7-flash`)
-- Free-model detection: OpenRouter/Nous/SenseNova read `pricing` fields (structural); OpenCode Zen uses `-free` suffix + hardcoded exceptions; NVIDIA NIM/Google AI Studio/Poolside use hand-maintained allowlists (`KNOWN_FREE`) that only get verified when a real key runs refresh
+- Groq and StepFun were removed as direct providers (2026-08); as of 2026-09-02 StepFun's model has NO free source left — NVIDIA NIM no longer lists `stepfun-ai/step-3.7-flash` and Nous' `stepfun/step-3.7-flash:free` 400s ("missing tags") on every chat payload, so `step-3.7-flash` was dropped from TIERS["mid"]
+- NVIDIA NIM: whole catalog is free-tier; funnel = live catalog minus non-chat endpoints (embed/guard/vision/riva/reward/video blocklist), then probe-verified. Kimi K3 (`moonshotai/kimi-k3`) is catalog-listed since 2026-09-02 and pools into tier/high alongside sensenova and leuai K3 instances; `moonshotai/kimi-k2.6` went 404-dead upstream and was pruned
+- Free-model detection: OpenRouter/Nous/SenseNova read `pricing` fields (structural); OpenCode Zen uses `-free suffix` + hardcoded exceptions; NVIDIA NIM uses the catalog-minus-non-chat blocklist; Google AI Studio keeps `KNOWN_FREE` (native v1beta has no pricing signal). Everything is then probe-verified by probe.py regardless of detection method
 
 ## Related
 

@@ -55,7 +55,7 @@ class Daemon:
         on the real interval timer."""
         print(f"[scheduler] refreshing free models (every {self.cfg.refresh_interval_hours}h)...")
         try:
-            results = refresh(self.reg)
+            results = refresh(self.reg, verify=self.cfg.verify_models)
             changed = any(results.values())
             if changed:
                 self.reg.save(self.cfg.registry_path, git_history=self.cfg.registry_git_history)

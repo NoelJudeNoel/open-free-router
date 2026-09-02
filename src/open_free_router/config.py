@@ -15,6 +15,7 @@ DEFAULT_CONFIG_PATHS = [
 # Map registry provider names → PI-compatible names.
 _PI_PROVIDER_NAMES: dict[str, str] = {
     "openrouter": "local-free",
+    "ant-ling": "ant-ling",
 }
 
 
@@ -52,6 +53,15 @@ class Config:
         # for the same request so the app never sees a 429. On by default.
         self.tier_cascade = bool(self._raw.get("tier_cascade", True))
 
+        # Live model verification (probe.py): after each refresh source's
+        # structural free-detection, every candidate gets one minimal real
+        # chat completion and only models that answer enter the registry.
+        # A /v1/models listing alone is not trustworthy (2026-09-02 audit:
+        # NVIDIA NIM listed 54 chat models, 9 answered; kimi-k2.6 was in
+        # our own registry while 404ing upstream). On by default; the
+        # per-probe cost is one tiny request per candidate per refresh.
+        self.verify_models = bool(self._raw.get("verify_models", True))
+
         # ui
         self.ui_host = self._raw.get("ui", {}).get("host", "127.0.0.1")
         self.ui_port = int(self._raw.get("ui", {}).get("port", 9057))
@@ -85,6 +95,7 @@ class Config:
             "refresh_interval_hours": self.refresh_interval_hours,
             "upstream_timeout": self.upstream_timeout,
             "tier_cascade": self.tier_cascade,
+            "verify_models": self.verify_models,
             "registry_git_history": self.registry_git_history,
             "data_dir": str(self.data_dir),
         }

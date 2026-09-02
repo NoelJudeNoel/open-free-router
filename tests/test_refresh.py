@@ -83,3 +83,62 @@ def test_any_results_values_reflects_real_change_not_fetch_success():
     assert any(results.values()) is False
     results["b"] = True
     assert any(results.values()) is True
+
+
+# ── live probe verification wiring (probe.verify_models) ────────────────
+
+def _install_source(monkeypatch, models):
+    import open_free_router.refresh as refresh_mod
+    monkeypatch.setitem(refresh_mod.SOURCE_MAP, "fake", _fake_source(models))
+
+
+def test_verify_drops_probe_dead_models(monkeypatch):
+    import open_free_router.refresh as refresh_mod
+    reg = Registry({
+        "fake": {"upstream_url": "https://example.com/v1", "api_key": "sk-test",
+                 "models": [{"id": "m1"}, {"id": "m2"}]},
+    })
+    _install_source(monkeypatch, [ModelInfo(id="m1"), ModelInfo(id="m2"),
+                                  ModelInfo(id="m3")])
+    # m2 answers nothing (probe-dead), m3 is new and verified
+    monkeypatch.setattr(
+        refresh_mod, "verify_models",
+        lambda name, url, key, models: ([ModelInfo(id="m1"), ModelInfo(id="m3")], []),
+    )
+    results = refresh(reg, provider_name="fake", verify=True)
+    assert results["fake"] is True
+    assert [m.id for m in reg.get("fake").models] == ["m1", "m3"]
+
+
+def test_verify_never_wipes_on_unanimous_probe_failure(monkeypatch):
+    """Every candidate failing the probe is the signature of a rotated key
+    or an upstream outage, not of a dead model -- the existing list must
+    survive and the cycle must report no change."""
+    import open_free_router.refresh as refresh_mod
+    reg = Registry({
+        "fake": {"upstream_url": "https://example.com/v1", "api_key": "sk-test",
+                 "models": [{"id": "m1"}, {"id": "m2"}]},
+    })
+    _install_source(monkeypatch, [ModelInfo(id="m1"), ModelInfo(id="m2")])
+    monkeypatch.setattr(refresh_mod, "verify_models",
+                        lambda name, url, key, models: ([], []))
+    results = refresh(reg, provider_name="fake", verify=True)
+    assert results["fake"] is False
+    assert [m.id for m in reg.get("fake").models] == ["m1", "m2"]
+
+
+def test_verify_false_skips_probe_entirely(monkeypatch):
+    import open_free_router.refresh as refresh_mod
+    reg = Registry({
+        "fake": {"upstream_url": "https://example.com/v1", "api_key": "sk-test",
+                 "models": [{"id": "m1"}]},
+    })
+    _install_source(monkeypatch, [ModelInfo(id="m1"), ModelInfo(id="m2")])
+
+    def _must_not_run(*a, **kw):
+        raise AssertionError("verify_models must not run when verify=False")
+
+    monkeypatch.setattr(refresh_mod, "verify_models", _must_not_run)
+    results = refresh(reg, provider_name="fake", verify=False)
+    assert results["fake"] is True
+    assert [m.id for m in reg.get("fake").models] == ["m1", "m2"]

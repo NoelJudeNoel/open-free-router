@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-"""NVIDIA NIM free models source."""
+"""NVIDIA NIM free models source.
+
+Funnel (2026-09-02 redesign): the whole NIM catalog is on NVIDIA's free
+endpoint tier, so the old 7-entry KNOWN_FREE allowlist was retired -- it
+was stale in both directions (still listed step-3.7-flash / glm-5.2 /
+mistral-medium-3.5-128b which are NOT in the live catalog, and blocked
+newer live models like kimi-k3). Detection is now:
+
+  1. live /v1/models catalog (authenticated)
+  2. minus non-chat endpoints (embed / rerank / guard / vision / OCR /
+     translate / reward / video -- they don't serve chat completions)
+  3. minus anything that fails the live chat-probe in probe.py
+     (wired in by refresh.refresh(); this module only does steps 1-2)
+
+Step 3 is not optional hygiene -- the same 2026-09-02 audit that produced
+this redesign probed all 54 chat-capable catalog entries and only 9
+answered 200; 38 of them 404'd with "Function ... Not found", INCLUDING
+``moonshotai/kimi-k2.6``, which sat in our production registry as healthy
+at the time. NIM's catalog keeps long-dead listings; only a real request
+tells you what actually runs.
+"""
 from __future__ import annotations
 
 import re
@@ -10,48 +30,33 @@ import requests
 from open_free_router.registry import ModelInfo
 
 # Same pattern as tiers._DATE_SUFFIX_RE -- strip trailing -MMDD / -YYYYMMDD
-# date suffixes from model ids before the KNOWN_FREE allowlist match.
+# date suffixes from model ids before canonicalization.
 _DATE_SUFFIX_RE = re.compile(r"-\d{4,}$")
 
 
 SOURCE_NAME = "nvidia-nim"
 
-# Verified 2026-08-02 against build.nvidia.com/models (NVIDIA's own
-# catalog page, "Free Endpoint" filter) -- not a live authenticated
-# /v1/models call, since this sandbox can't reach NVIDIA's API. Treat
-# this as a lower-confidence check than an entry that's been running
-# against the real API for a while: the catalog page and the API
-# response aren't guaranteed to be perfectly in sync at every instant.
-# All four pre-existing entries below were re-confirmed present with a
-# "Free Endpoint" tag at the same time; two new ones were added
-# (mistral-medium-3.5-128b, deepseek-ai/deepseek-v4-flash) that weren't
-# previously in this list. Note: NVIDIA NIM serves deepseek-v4 as a dated
-# build -- deepseek-ai/deepseek-v4-flash-0731 on the live API; fetch() now
-# strips the -MMDD date suffix before the KNOWN_FREE match so the dated
-# variant is recognised as the same model. Run `open-free-router refresh
-# --source nvidia-nim` against a real key to confirm before relying on the
-# new entries in production.
-#
-# moonshotai/kimi-k2.6 added same day, same confidence tier: confirmed
-# free via build.nvidia.com/moonshotai/kimi-k2.6 (own product page,
-# explicit "Start building with a free API endpoint" + a working code
-# sample using this exact model id). Kimi K3 was explicitly NOT added
-# despite being requested -- as of this same date it isn't on NVIDIA
-# NIM at all yet (confirmed via a live, unresolved NVIDIA Developer
-# Forums thread from days earlier asking NVIDIA to add it; also
-# consistent with K3's enormous deploy footprint -- 2.8T params,
-# 8x GB300-class hardware in official deploy guides -- for a model that
-# only finished releasing in the prior ~week). K2.6 is the newest Kimi
-# actually available on NIM right now.
-KNOWN_FREE = {
-    "stepfun-ai/step-3.7-flash",
-    "z-ai/glm-5.2",
-    "minimaxai/minimax-m3",
-    "nvidia/nemotron-3-ultra-550b-a55b",
-    "mistralai/mistral-medium-3.5-128b",
-    "deepseek-ai/deepseek-v4-flash",
-    "moonshotai/kimi-k2.6",
-}
+# Catalog entries that are not chat-completions models. Substring match on
+# the lowercased id. Embed/rerank/safety/reward models answer other NIM
+# endpoints, vision-only models need image payloads, and none of them can
+# serve the chat completions this router forwards -- verified empirically
+# on 2026-09-02 (the 404/"not a chat model" shape of the catalog matches
+# this list exactly).
+NON_CHAT_KEYWORDS = (
+    "embed", "retriev", "rerank",       # embedding / retrieval models
+    "guard", "safety", "reward",        # moderation / reward models
+    "clip", "vision", "vlm",            # vision encoders / vision-only
+    "riva",                             # speech / translate endpoints
+    "deplot", "kosmos", "fuyu", "neva", "vila", "nv-ocr", "nemotron-parse",
+    "cosmos",                           # world/video reasoning models
+    "video",                            # synthetic-video-detector etc.
+    "ising",                            # calibration research model
+)
+
+
+def _is_chat_model(mid: str) -> bool:
+    low = mid.lower()
+    return not any(k in low for k in NON_CHAT_KEYWORDS)
 
 
 def fetch(provider_base_url: str, api_key: str | None = None) -> List[ModelInfo]:
@@ -73,18 +78,22 @@ def fetch(provider_base_url: str, api_key: str | None = None) -> List[ModelInfo]
 
     for m in data.get("data", []):
         mid = m.get("id", "")
-        # Strip -MMDD date suffixes (e.g. -0731) so dated builds match
-        # the canonical KNOWN_FREE entries.
+        # Strip -MMDD date suffixes (e.g. -0731) so dated builds canonicalize
+        # to their base name; the full dated id is kept in upstream_id.
         canonical_mid = _DATE_SUFFIX_RE.sub("", mid)
-        if canonical_mid in KNOWN_FREE:
-            short_id = canonical_mid.split("/")[-1]  # e.g. "deepseek-v4-flash"
-            models.append(ModelInfo(
-                id=short_id,
-                upstream_id=mid,  # full API path WITH date suffix for forwarding
-                context_window=m.get("context_length", 131072) or 131072,
-                max_tokens=16384,
-                reasoning="nemotron" in mid.lower(),
-            ))
+        if not _is_chat_model(canonical_mid):
+            continue
+        short_id = canonical_mid.split("/")[-1]  # e.g. "deepseek-v4-flash"
+        models.append(ModelInfo(
+            id=short_id,
+            upstream_id=mid,  # full API path WITH date suffix for forwarding
+            # NIM's /v1/models exposes no context metadata; stay conservative
+            # (tier context pre-filter then treats every NIM instance as 128k)
+            context_window=m.get("context_length", 131072) or 131072,
+            max_tokens=16384,
+            reasoning="nemotron" in mid.lower() or "gpt-oss" in mid.lower(),
+        ))
 
-    print(f"  Found {len(models)} free {SOURCE_NAME} models")
+    print(f"  Found {len(models)} chat-capable {SOURCE_NAME} catalog models "
+          f"(live-probe filtering happens in refresh)")
     return models

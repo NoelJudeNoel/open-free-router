@@ -211,7 +211,8 @@ class _UIHandler(BaseHTTPRequestHandler):
             data = {}
         provider_name = data.get("provider")
         from open_free_router.refresh import refresh
-        results = refresh(self.reg, provider_name=provider_name)
+        results = refresh(self.reg, provider_name=provider_name,
+                          verify=getattr(self.cfg, "verify_models", True))
         changed = any(v for v in results.values())
         if changed:
             assert self.reg is not None

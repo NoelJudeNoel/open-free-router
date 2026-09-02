@@ -101,13 +101,13 @@ def test_is_tier_id_false(mid):
 
 # tier mapping contents (design spec)
 def test_high_tier_logical_ids():
-    assert TIERS["high"] == ["glm-5.2", "deepseek-v4-flash",
+    assert TIERS["high"] == ["glm-5.2", "deepseek-v4-flash", "kimi-k3",
                              "gemini-3.7-flash", "gemini-3.6-flash"]
 
 
 def test_mid_tier_logical_ids():
     assert set(TIERS["mid"]) == {
-        "minimax-m3", "step-3.7-flash", "laguna-s-2.1", "laguna-xs-2.1",
+        "minimax-m3", "laguna-s-2.1", "laguna-xs-2.1",
         "mimo-v2.5", "deepseek-v4-pro", "nemotron-3-ultra-550b-a55b",
     }
 
@@ -162,10 +162,11 @@ def test_high_pool_contains_expected_instances(registry):
     pool = tier_members("high", registry)
     keys = {f"{p.provider.name}/{p.model.id}" for p in pool}
     assert "sensenova/glm-5.2" in keys
-    # model.id is the local short id (see registry.default.yaml), not the
-    # fully-qualified upstream_id -- nvidia-nim's local id for this model
-    # is "glm-5.2", same as sensenova's, distinguished by provider name.
-    assert "nvidia-nim/glm-5.2" in keys
+    # 2026-09-02: NIM no longer lists z-ai/glm-5.2, so the high pool's
+    # glm-5.2 instance is sensenova-only now (probe re-checks every cycle).
+    assert "nvidia-nim/glm-5.2" not in keys
+    # kimi-k3 joined the high tier 2026-09-02 (sensenova + NIM instances)
+    assert "nvidia-nim/kimi-k3" in keys
     assert "sensenova/deepseek-v4-flash" in keys
     assert "google-ai-studio/gemini-3.6-flash" in keys
 

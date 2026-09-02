@@ -74,7 +74,8 @@ def cmd_refresh(args):
     reg = Registry.load(cfg.registry_path)
 
     source = args.source
-    results = refresh(reg, provider_name=source)
+    results = refresh(reg, provider_name=source,
+                      verify=cfg.verify_models and not args.skip_verify)
 
     if source and source not in results:
         print(f"Unknown source: {source}. Available: {sorted(set(results) | {'openrouter','nvidia-nim'})}")
@@ -214,6 +215,9 @@ def main(args: list[str] | None = None):
     p_refresh = sub.add_parser("refresh", help="refresh free model lists from APIs")
     p_refresh.add_argument("--source", help="only refresh this source")
     p_refresh.add_argument("--dry-run", action="store_true")
+    p_refresh.add_argument("--skip-verify", action="store_true",
+                           help="skip the live chat-probe usability check "
+                                "(catalog listing only)")
     p_refresh.set_defaults(func=cmd_refresh)
 
     p_ui = sub.add_parser("ui", help="start web dashboard")

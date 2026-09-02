@@ -24,6 +24,7 @@ def _mock_response(json_data):
 class TestGoogleAiStudio:
     SAMPLE = {
         "models": [
+            {"name": "models/gemini-3.7-flash", "displayName": "Gemini 3.7 Flash", "inputTokenLimit": 1048576},
             {"name": "models/gemini-3.6-flash", "displayName": "Gemini 3.6 Flash", "inputTokenLimit": 1048576},
             {"name": "models/gemini-3.5-flash-lite", "displayName": "Gemini 3.5 Flash-Lite", "inputTokenLimit": 1048576},
             {"name": "models/gemma-3-27b-it", "displayName": "Gemma 3 27B", "inputTokenLimit": 131072},

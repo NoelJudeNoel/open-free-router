@@ -1,10 +1,15 @@
-"""Tests for refresh_sources/nvidia_nim.py -- previously had zero
-dedicated coverage (only used as generic registry/proxy test fixture
-data unrelated to its own fetch() logic). Sample payload below is
-shaped to match NVIDIA NIM's real /v1/models response format
-(id/object/created), based on the model IDs confirmed present on
-build.nvidia.com/models (see the KNOWN_FREE comment in nvidia_nim.py
-for what was and wasn't independently verified).
+"""Tests for refresh_sources/nvidia_nim.py.
+
+Funnel as of 2026-09-02: the whole NIM catalog is free, so detection is
+"live catalog minus non-chat endpoints"; usability is NOT this module's
+job anymore -- refresh() runs every candidate through probe.verify_models
+(one real chat completion each) before anything reaches the registry.
+That division matters for reading these tests: fetch() returning a model
+is a claim that it's listed AND chat-shaped, not that it currently
+answers. The 2026-09-02 audit found NIM's catalog lists ~38 chat models
+that 404 on real requests (kimi-k2.6 included, while it sat in our
+production registry as "healthy") -- exactly what the probe step exists
+to catch.
 """
 from __future__ import annotations
 
@@ -22,22 +27,29 @@ def _mock_response(json_data):
 
 SAMPLE = {
     "data": [
-        {"id": "stepfun-ai/step-3.7-flash", "object": "model", "context_length": 131072},
-        {"id": "z-ai/glm-5.2", "object": "model", "context_length": 1048576},
+        # chat-capable catalog entries -> included
+        {"id": "deepseek-ai/deepseek-v4-flash-0731", "object": "model",
+         "context_length": 1048576},
+        {"id": "deepseek-ai/deepseek-v4-pro-0813", "object": "model"},
         {"id": "minimaxai/minimax-m3", "object": "model"},
-        {"id": "nvidia/nemotron-3-ultra-550b-a55b", "object": "model"},
-        {"id": "mistralai/mistral-medium-3.5-128b", "object": "model"},
-        {"id": "deepseek-ai/deepseek-v4-flash", "object": "model"},
-        {"id": "moonshotai/kimi-k2.6", "object": "model", "context_length": 262144},
-        # present upstream but NOT in KNOWN_FREE -- must be excluded
-        {"id": "nvidia/cosmos3-nano", "object": "model"},
-        {"id": "deepseek-ai/deepseek-v4-pro", "object": "model"},
-        # Kimi K3 does not exist on NVIDIA NIM as of this writing --
-        # explicitly NOT added to KNOWN_FREE despite being requested;
-        # see nvidia_nim.py's own comment for why. Included here to
-        # guard against it ever silently sneaking into KNOWN_FREE on a
-        # guess rather than a real confirmed listing.
+        {"id": "moonshotai/kimi-k2.6", "object": "model"},
         {"id": "moonshotai/kimi-k3", "object": "model"},
+        {"id": "nvidia/nemotron-3-ultra-550b-a55b", "object": "model"},
+        {"id": "nvidia/nemotron-3.5-lightning-30b-a3b", "object": "model"},
+        {"id": "openai/gpt-oss-120b", "object": "model"},
+        {"id": "google/gemma-4-31b-it", "object": "model"},
+        # listed upstream but NOT chat-completions models -> excluded
+        {"id": "nvidia/embed-qa-4", "object": "model"},
+        {"id": "nvidia/nemotron-3.5-content-safety", "object": "model"},
+        {"id": "nvidia/riva-translate-4b-instruct", "object": "model"},
+        {"id": "nvidia/nemotron-parse", "object": "model"},
+        {"id": "nvidia/neva-22b", "object": "model"},
+        {"id": "nvidia/nvclip", "object": "model"},
+        {"id": "snowflake/arctic-embed-l", "object": "model"},
+        {"id": "meta/llama-guard-4-12b", "object": "model"},
+        {"id": "nvidia/nemotron-4-340b-reward", "object": "model"},
+        {"id": "nvidia/cosmos-reason2-8b", "object": "model"},
+        {"id": "nvidia/ai-synthetic-video-detector", "object": "model"},
     ]
 }
 
@@ -47,38 +59,27 @@ class TestNvidiaNim:
         assert nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key=None) == []
 
     @patch("requests.get")
-    def test_only_known_free_included(self, mock_get):
+    def test_chat_catalog_included_non_chat_excluded(self, mock_get):
         mock_get.return_value = _mock_response(SAMPLE)
         models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
         ids = {m.id for m in models}
-        # id is now the short canonical form (prefix stripped)
-        expected = {mid.split("/")[-1] for mid in nvidia_nim.KNOWN_FREE}
-        assert ids == expected
-        assert "nvidia/cosmos3-nano" not in ids  # exists upstream, not free
-        assert "deepseek-v4-pro" not in ids  # sibling model, not the free -flash one
+        assert ids == {
+            "deepseek-v4-flash", "deepseek-v4-pro", "minimax-m3",
+            "kimi-k2.6", "kimi-k3", "nemotron-3-ultra-550b-a55b",
+            "nemotron-3.5-lightning-30b-a3b", "gpt-oss-120b", "gemma-4-31b-it",
+        }
 
     @patch("requests.get")
-    def test_newly_added_entries_are_present(self, mock_get):
-        """Guards the specific two IDs added after the build.nvidia.com
-        catalog check -- if either gets typo'd or removed from
-        KNOWN_FREE without updating this test, this fails loudly."""
+    def test_kimi_k3_included(self, mock_get):
+        """K3 IS listed on the live NIM catalog as of 2026-09-02 (verified
+        against the authenticated /v1/models response). The historical
+        exclusion here was correct then -- NIM didn't host it -- and is
+        stale now. Usability verification is probe.verify_models' job in
+        refresh(), not this allowlist-free module's."""
         mock_get.return_value = _mock_response(SAMPLE)
         models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
-        ids = {m.id for m in models}
-        assert "mistral-medium-3.5-128b" in ids
-        assert "deepseek-v4-flash" in ids
-
-    @patch("requests.get")
-    def test_kimi_k2_6_included_k3_excluded(self, mock_get):
-        """K2.6 is the newest Kimi actually free on NVIDIA NIM. K3 was
-        requested but does not exist on NIM yet -- must not appear even
-        though a plausible-looking entry for it is present in the mocked
-        upstream response, guarding against ever adding it on a guess."""
-        mock_get.return_value = _mock_response(SAMPLE)
-        models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
-        ids = {m.id for m in models}
-        assert "kimi-k2.6" in ids
-        assert "kimi-k3" not in ids
+        by_id = {m.id: m for m in models}
+        assert by_id["kimi-k3"].upstream_id == "moonshotai/kimi-k3"
 
     @patch("requests.get")
     def test_reasoning_flag_from_id_heuristic(self, mock_get):
@@ -86,7 +87,8 @@ class TestNvidiaNim:
         models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
         by_id = {m.id: m for m in models}
         assert by_id["nemotron-3-ultra-550b-a55b"].reasoning is True
-        assert by_id["glm-5.2"].reasoning is False
+        assert by_id["gpt-oss-120b"].reasoning is True
+        assert by_id["minimax-m3"].reasoning is False
 
     @patch("requests.get")
     def test_sends_bearer_auth(self, mock_get):
@@ -101,8 +103,12 @@ class TestNvidiaNim:
         assert nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test") == []
 
     @patch("requests.get")
-    def test_model_no_longer_present_upstream_yields_empty(self, mock_get):
-        mock_get.return_value = _mock_response({"data": [{"id": "some-unrelated-model"}]})
+    def test_only_non_chat_catalog_entries_yield_empty(self, mock_get):
+        """Under the all-free funnel a bare chat-shaped id IS included
+        (usability is probe's job); only non-chat endpoints are filtered
+        here. So an upstream response containing solely an embed model
+        yields nothing."""
+        mock_get.return_value = _mock_response({"data": [{"id": "nvidia/embed-qa-4"}]})
         models = nvidia_nim.fetch("https://integrate.api.nvidia.com/v1", api_key="nvapi-test")
         assert models == []
 
