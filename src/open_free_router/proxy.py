@@ -419,6 +419,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         # because the same bare model ID (e.g. step-3.7-flash) may exist
         # in multiple providers with different upstream_ids.
         upstream_model_id = model_id  # fallback
+        matched_max_tokens = 0  # 0 = no cap from this concrete model
         if p:
             for m in p.models:
                 # Check all forms:
@@ -434,8 +435,20 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                         or prov_upstream == model_id
                         or prefix_uid == model_id):
                     upstream_model_id = m.effective_upstream_id
+                    matched_max_tokens = m.max_tokens
                     break
         req["model"] = upstream_model_id
+        # Clamp max_tokens to the concrete model's registered output cap.
+        # Agents (Hermes, OMP, OpenCode) can send max_tokens far above the
+        # upstream's real limit — e.g. Hermes boosts to 32768 on length
+        # continuation / tool-call truncation retries, which Groq rejects
+        # deterministically with a 400. The tier path already clamps this in
+        # _patch_model(); the concrete-model path did not, so a direct
+        # concrete-model request went through unclamped (bug #ofr-hermes-qwen).
+        if matched_max_tokens:
+            mt = req.get("max_tokens")
+            if isinstance(mt, int) and mt > matched_max_tokens:
+                req["max_tokens"] = matched_max_tokens
         # Normalize OpenAI "developer" role to "system" for upstreams that
         # only accept system/user/assistant (older OpenAI-compatible APIs).
         for msg in req.get("messages", []):
