@@ -10,4 +10,4 @@ Quick start:
 
 # Single source of truth for the CLI --version flag and diagnostics.
 # Bump in lockstep with CHANGELOG.md. pyproject.toml keeps the same value.
-__version__ = "0.3.0"
+__version__ = "0.3.1"

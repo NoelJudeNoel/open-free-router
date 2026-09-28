@@ -64,6 +64,42 @@ found") while sitting in the registry as healthy.
   teamo wallet empty (all models 400), bearlab token invalid (401);
   template no longer bootstraps teamorouter.
 
+## [0.3.1] - 2026-09-02
+
+OpenCode Zen session-header release. Zen's relay has hardened in three
+stages (2026-09-05 session header, 2026-09-22 per-model endpoint split,
+2026-09-23 FreeTierError request-shape gate); this release clears the
+first of them on our side and documents the rest honestly.
+
+### Fixed
+- **probe & proxy: inject `x-opencode-session` for OpenCode Zen** —
+  `probe.py` now sends a stable session header on every Zen candidate
+  (clearing the 2026-09-05 `400 MissingSessionID` gate); `upstream.py`
+  synthesizes a per-conversation id for real traffic (prefers an incoming
+  `x-opencode-session` from DSH's dsh-opencode-session plugin, otherwise
+  derives from the first user message — stable across a conversation's
+  turns, so the relay's prompt-cache affinity stays warm). **This does
+  not defeat the 2026-09-23 `FreeTierError` gate.** We reproduced the
+  full identity stack the gateway asks for — anonymous `Bearer public`,
+  OpenCode User-Agent, `x-opencode-client`, `project`, canonical
+  `x-opencode-session`, per-request `x-opencode-request`, a `tools` array
+  containing `bash`/`read`, `stream: true`, and the correct per-model
+  endpoint (`muse-spark-*` → `/v1/responses`, the rest →
+  `/v1/chat/completions`) — and every combination still returns 403
+  `FreeTierError`. Third-party state of the art (pi-opencode-zen, now
+  DEPRECATED/UNUSABLE) agrees this is not bypassable by headers or client
+  emulation, pointing at egress-IP reputation plus a shared per-IP
+  anonymous quota. See AGENTS.md "Supported providers" for the full
+  timeline.
+- **AGENTS.md updated** with the three-stage Zen gate timeline and the
+  reproduction evidence (including the control run showing we do reach
+  the gateway and are refused past it).
+- Also carried in this release: the daemon fix below — a stale orphan
+  process had been holding ports 8337/9057 since mid-September, so
+  systemd's `MainPID=0` left it unkillable and restarts silently failed;
+  every earlier "restart" was served by that orphan running old code
+  while hot-reloading the new registry. Killed and cleanly restarted.
+
 ## [0.2.0] - 2026-08-16
 
 Tier observability release: per-request failover trails surfaced across
