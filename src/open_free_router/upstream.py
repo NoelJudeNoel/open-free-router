@@ -19,11 +19,13 @@ Policy (mirrors LiteLLM's fallback model):
 """
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import socket
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -225,7 +227,70 @@ def _is_retryable_status(status: int) -> bool:
     return status == 429 or 500 <= status < 600
 
 
-def _build_headers(inst: UpstreamInstance, original: dict[str, Any]) -> dict[str, str]:
+# ── Session-affinity headers for relays that gate on origin ──────────────
+# Since 2026-09-05 OpenCode Zen's relay enforces an origin check: a request
+# that carries NEITHER an OpenCode-shaped User-Agent NOR an
+# `x-opencode-session` header is rejected with 403 FreeTierError ("OpenCode's
+# free tier can only be used from within OpenCode"). Our proxy/probe send a
+# generic `open-free-router/0.1` UA, so every Zen request was 403-ing -- which
+# silently collapsed the Zen model list to the one entry that didn't enforce
+# the gate (space-bunny-free). The dsh-opencode-session plugin (npm) fixes the
+# official OpenCode client by attaching this header; we do the same so any
+# agent routed through open-free-router passes the gate too.
+#
+# An incoming value (e.g. the plugin's per-conversation id, forwarded via
+# proxy.py's selective _headers stash) always wins -- inject_session_header
+# only synthesizes one when the header is absent.
+SESSION_HEADER_PROVIDERS: dict[str, str] = {
+    "opencode-zen-free": "x-opencode-session",
+}
+
+_PROCESS_SESSION_ID: str | None = None  # lazy fallback when no req body
+
+
+def _synthesize_session_id(req: dict[str, Any] | None) -> str:
+    """Stable per-conversation session id when no caller supplied one.
+
+    A multi-turn conversation reaches the proxy as separate requests that
+    each carry the full history, so the FIRST user turn is stable across
+    the turns of one conversation (and differs between conversations) --
+    a good affinity key without a real conversation id. Zen (and the
+    dsh-opencode-session plugin) use this header to pin a conversation
+    to one upstream backend, which is what keeps prompt-cache warm.
+    """
+    global _PROCESS_SESSION_ID
+    msgs = req.get("messages") if isinstance(req, dict) else None
+    if isinstance(msgs, list):
+        for m in msgs:
+            if isinstance(m, dict) and m.get("role") == "user":
+                c = m.get("content")
+                if c is not None and c != "":
+                    return "ofr-" + hashlib.sha256(str(c).encode("utf-8")).hexdigest()[:24]
+    if _PROCESS_SESSION_ID is None:
+        _PROCESS_SESSION_ID = "ofr-" + uuid.uuid4().hex
+    return _PROCESS_SESSION_ID
+
+
+def inject_session_header(
+    headers: dict[str, str], provider_name: str, req: dict[str, Any] | None
+) -> None:
+    """Ensure a session-affinity header is present for providers that need one.
+
+    Called AFTER passthrough headers are merged, so an explicit incoming
+    value (forwarded by proxy.py) always wins; we only synthesize when the
+    agent omitted it. Case-insensitive presence check so this works for both
+    the tier path (lowercased headers) and the direct path (mixed-case).
+    """
+    h = SESSION_HEADER_PROVIDERS.get(provider_name)
+    if not h:
+        return
+    if any(k.lower() == h for k in headers):
+        return
+    headers[h] = _synthesize_session_id(req)
+
+
+def _build_headers(inst: UpstreamInstance, original: dict[str, Any],
+                   req: dict[str, Any] | None = None) -> dict[str, str]:
     """Build upstream headers from the provider key + passthrough headers."""
     key = inst.provider.effective_key
     headers = {
@@ -239,6 +304,7 @@ def _build_headers(inst: UpstreamInstance, original: dict[str, Any]) -> dict[str
         if kl in ("content-type", "authorization", "content-length", "accept", "model"):
             continue
         headers[kl] = str(v if not isinstance(v, bool) else str(v).lower())
+    inject_session_header(headers, inst.provider.name, req)
     return headers
 
 
@@ -401,7 +467,7 @@ def forward_tier_buffered(tier: str, registry, req: dict[str, Any],
                 trace.add_attempt(inst.key, "cooldown_skip",
                                   reason="instance in cooldown")
             continue
-        headers = _build_headers(inst, original_headers)
+        headers = _build_headers(inst, original_headers, req)
         attempt = 0
         while attempt <= num_retries:
             data = json.dumps(_patch_model(req, inst)).encode()
@@ -523,7 +589,7 @@ def forward_tier_streaming(tier: str, registry, req: dict[str, Any],
                 trace.add_attempt(inst.key, "cooldown_skip",
                                   reason="instance in cooldown")
             continue
-        headers = _build_headers(inst, original_headers)
+        headers = _build_headers(inst, original_headers, req)
         attempt = 0
         while attempt <= num_retries:
             data = json.dumps(_patch_model(req, inst)).encode()

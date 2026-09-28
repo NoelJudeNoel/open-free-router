@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 from open_free_router.registry import Registry
+from open_free_router.upstream import inject_session_header
 
 
 class _ProxyHandler(BaseHTTPRequestHandler):
@@ -283,6 +284,21 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "invalid json"})
                 return
 
+        # Thread select incoming session-affinity headers through to the
+        # upstream driver so a caller-supplied value (e.g. dsh-opencode-
+        # session's per-conversation id) wins over our synthesis. Only
+        # these allowlisted headers are forwarded -- not the whole incoming
+        # set -- so agent UA / opaque headers never leak to upstreams.
+        _inh = getattr(self, "headers", None)
+        if _inh is not None:
+            _fwd = {}
+            for _h in ("x-opencode-session", "x-deepseek-harness-session-id"):
+                _v = _inh.get(_h)
+                if _v:
+                    _fwd[_h] = _v
+            if _fwd:
+                req["_headers"] = _fwd
+
         model_id = req.get("model", "")
         provider_name = self._find_provider(model_id)
         if not provider_name:
@@ -474,6 +490,17 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             "Authorization": f"Bearer {key}",
             "User-Agent": "open-free-router/0.1",
         }
+        # Origin-gated providers (OpenCode Zen since 2026-09-05) require a
+        # session-affinity header or they 403 FreeTierError. Prefer a
+        # caller-supplied one (forwarded above onto req["_headers"], but the
+        # direct path doesn't go through _build_headers, so pull it from the
+        # incoming request directly); else synthesize per conversation.
+        _inh = getattr(self, "headers", None)
+        _sess = _inh.get("x-opencode-session") if _inh else None
+        if _sess:
+            headers["x-opencode-session"] = _sess
+        else:
+            inject_session_header(headers, p.name, req)
         timeout = getattr(self, "_upstream_timeout", 120)
 
         if is_stream:

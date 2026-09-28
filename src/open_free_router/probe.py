@@ -39,6 +39,7 @@ Batch guards (never wipe the registry because of an outage):
 """
 from __future__ import annotations
 
+import functools
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -52,6 +53,17 @@ from open_free_router.registry import ModelInfo
 CHAT_PATH_OVERRIDES: dict[str, str] = {
     # Google AI Studio's OpenAI-compat surface lives one level below v1beta
     "google-ai-studio": "/openai/chat/completions",
+}
+
+# Providers whose relay gates on origin and requires a session-affinity
+# header on the probe request too (see upstream.SESSION_HEADER_PROVIDERS).
+# OpenCode Zen (2026-09-05): without this header the probe 403s
+# FreeTierError on every Zen model, which the keep-all guard would NOT
+# catch if even one model bypasses the gate (it did -- space-bunny-free --
+# so the rest got wiped to a single survivor). The probe sends one stable
+# value; per-conversation granularity is irrelevant for a one-shot probe.
+PROBE_SESSION_HEADERS: dict[str, dict[str, str]] = {
+    "opencode-zen-free": {"x-opencode-session": "ofr-probe"},
 }
 
 DEFAULT_TIMEOUT = 30
@@ -97,11 +109,14 @@ def probe_chat(
     timeout: int = DEFAULT_TIMEOUT,
     max_tokens: int = 16,
     session: Optional[requests.Session] = None,
+    extra_headers: Optional[dict] = None,
 ) -> ProbeResult:
     """Send one minimal chat completion to `model` and classify the answer.
 
     The payload is deliberately tiny (single "Say pong" user turn, small
     max_tokens) so a full-provider sweep costs seconds, not tokens.
+    `extra_headers` injects provider-specific headers (e.g. Zen's
+    x-opencode-session) so origin-gated relays don't false-negative.
     """
     url = f"{base_url.rstrip('/')}{chat_path}"
     headers = {
@@ -109,6 +124,9 @@ def probe_chat(
         "User-Agent": "open-free-router/0.1",
         "Content-Type": "application/json",
     }
+    if extra_headers:
+        for k, v in extra_headers.items():
+            headers[k] = str(v)
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": "Say pong"}],
@@ -175,6 +193,13 @@ def verify_models(
         chat_path = CHAT_PATH_OVERRIDES.get(provider_name, "/chat/completions")
     if probe_fn is None:
         probe_fn = probe_chat
+    # Origin-gated providers (OpenCode Zen) need a session-affinity header on
+    # the probe too, or every candidate 403s FreeTierError. Bake it into the
+    # real probe_chat via partial; a caller-supplied probe_fn is left alone
+    # (its signature doesn't accept extra_headers and tests rely on that).
+    extra = PROBE_SESSION_HEADERS.get(provider_name)
+    if extra and probe_fn is probe_chat:
+        probe_fn = functools.partial(probe_fn, extra_headers=extra)
 
     results: List[ProbeResult] = []
     consecutive_inconclusive = 0
