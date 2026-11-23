@@ -15,7 +15,6 @@ from open_free_router.refresh_sources import (
     nous,
     sensenova,
     opencode_zen,
-    ant_ling,
 )
 
 # Map registry provider name -> refresh source module
@@ -27,7 +26,6 @@ SOURCE_MAP = {
     "nous": nous,
     "sensenova": sensenova,
     "opencode-zen-free": opencode_zen,
-    "ant-ling": ant_ling,
 }
 
 
@@ -99,38 +97,46 @@ def refresh(reg: Registry, provider_name: str | None = None, verify: bool = True
             continue
 
         print(f"Refreshing {name}...")
-        new_models = source.fetch(
-            provider_base_url=p.upstream_url or p.base_url,
-            api_key=p.effective_key,
-        )
+        try:
+            new_models = source.fetch(
+                provider_base_url=p.upstream_url or p.base_url,
+                api_key=p.effective_key,
+            )
 
-        if not new_models:
-            print(f"  ⚠ {name} fetch returned no models")
-            results[name] = False
-            continue
-
-        current_ids = [m.id for m in p.models]
-
-        if verify:
-            new_models, _probe_results = verify_models(
-                name, p.upstream_url or p.base_url, p.effective_key, new_models)
             if not new_models:
-                # Every candidate failed the live probe. Never wipe a
-                # provider's list on a unanimous probe failure -- that
-                # pattern is what a rotated key / upstream outage looks
-                # like, not what a dead model looks like.
-                print(f"  ⚠ {name}: all {len(current_ids)} models failed probe "
-                      f"-- keeping existing list")
+                print(f"  ⚠ {name} fetch returned no models")
                 results[name] = False
                 continue
 
-        new_ids = [m.id for m in new_models]
-        changed = current_ids != new_ids
-        if changed:
-            reg.update_models(name, new_models)
-            print(f"  ✓ {name} updated: {len(new_models)} models")
-        else:
-            print(f"  ✓ {name} unchanged: {len(new_models)} models")
-        results[name] = changed
+            current_ids = [m.id for m in p.models]
+
+            if verify:
+                new_models, _probe_results = verify_models(
+                    name, p.upstream_url or p.base_url, p.effective_key, new_models)
+                if not new_models:
+                    # Every candidate failed the live probe. Never wipe a
+                    # provider's list on a unanimous probe failure -- that
+                    # pattern is what a rotated key / upstream outage looks
+                    # like, not what a dead model looks like.
+                    print(f"  ⚠ {name}: all {len(current_ids)} models failed probe "
+                          f"-- keeping existing list")
+                    results[name] = False
+                    continue
+
+            new_ids = [m.id for m in new_models]
+            changed = current_ids != new_ids
+            if changed:
+                reg.update_models(name, new_models)
+                print(f"  ✓ {name} updated: {len(new_models)} models")
+            else:
+                print(f"  ✓ {name} unchanged: {len(new_models)} models")
+            results[name] = changed
+        except Exception as e:
+            # One broken source must not abort the rest of the cycle. A
+            # schema change or parse bug upstream is exactly the kind of
+            # thing that used to escape refresh() and kill the scheduler's
+            # whole pass; isolate it per provider instead.
+            print(f"  ✗ {name} refresh failed: {type(e).__name__}: {e}")
+            results[name] = False
 
     return results

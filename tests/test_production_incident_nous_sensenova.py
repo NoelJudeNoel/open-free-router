@@ -31,11 +31,20 @@ class TestNousNoUnverifiedEntries:
     def test_nous_has_no_models_pending_reverification(self):
         """Guards against re-adding an unverified manual entry without
         realizing that's what happened last time -- see the nous: block's
-        own comment in registry.default.yaml for the full incident."""
+        own comment in registry.default.yaml for the full incident.
+
+        As of 2026-11-24 the two entries the refresh source actually
+        serves (hy4-flash, longcat-2.5) are probe-verified, so they are
+        allowed here. The two that probe-dead (solar-mini4, step-3.7-flash)
+        must not come back."""
         reg = _load_default_registry()
         nous = reg.get("nous")
         assert nous is not None
-        assert nous.models == []
+        ids = {m.id for m in nous.models}
+        assert "ling-3.0-flash:free" not in ids
+        assert "upstage/solar-mini4:free" not in ids
+        assert "stepfun/step-3.7-flash:free" not in ids
+        assert ids <= {"tencent/hy4-flash:free", "meituan/longcat-2.5:free"}
 
     def test_the_specific_confirmed_broken_id_is_gone(self):
         """ling-3.0-flash:free -> inclusionai/ling-3.0-flash:free 404'd

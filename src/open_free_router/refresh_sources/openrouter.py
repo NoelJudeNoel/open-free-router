@@ -42,12 +42,16 @@ def fetch(provider_base_url: str, api_key: str | None = None) -> List[ModelInfo]
         arch = m.get("architecture", {})
         if "text" not in arch.get("input_modalities", ["text"]):
             continue
+        top = m.get("top_provider") or {}
+        max_out = int(top.get("max_completion_tokens") or 16384)
         models.append(ModelInfo(
             id=mid,
             name=m.get("name", mid),
             context_window=m.get("context_length", 131072) or 131072,
-            max_tokens=min(m.get("context_length", 131072) or 131072, 16384),
-            reasoning="nemotron-3-ultra" in mid or "nemotron-3-super" in mid,
+            max_tokens=min(max_out, 16384),
+            reasoning=("reasoning" in (m.get("supported_parameters") or [])
+                       or "nemotron-3-ultra" in mid
+                       or "nemotron-3-super" in mid),
         ))
 
     models.sort(key=lambda x: x.context_window, reverse=True)

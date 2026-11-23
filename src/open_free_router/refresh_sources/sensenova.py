@@ -52,11 +52,18 @@ def fetch(provider_base_url: str, api_key: str | None = None) -> List[ModelInfo]
         print(f"  ✗ {SOURCE_NAME} fetch failed: {e}")
         return models
 
-    for m in data.get("data", []):
+    entries = data.get("data", [])
+    # 2026-11: SenseNova's /v1/models stopped returning `pricing` entirely
+    # (now: businesses + modality lists). When pricing is present we still
+    # honour it; when it's absent the provider only lists models available
+    # to this key, so modality filtering is the only usable signal.
+    has_pricing = any("pricing" in m for m in entries)
+
+    for m in entries:
         mid = m.get("id", "")
         if not mid:
             continue
-        if not _is_free(m.get("pricing", {})):
+        if has_pricing and not _is_free(m.get("pricing", {})):
             continue
         if "text" not in m.get("output_modalities", ["text"]):
             continue

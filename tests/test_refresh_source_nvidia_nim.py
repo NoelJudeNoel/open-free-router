@@ -50,6 +50,9 @@ SAMPLE = {
         {"id": "nvidia/nemotron-4-340b-reward", "object": "model"},
         {"id": "nvidia/cosmos-reason2-8b", "object": "model"},
         {"id": "nvidia/ai-synthetic-video-detector", "object": "model"},
+        # 2026-11 live catalog additions that are not chat endpoints
+        {"id": "bigcode/starcoder2-15b", "object": "model"},
+        {"id": "fastino/gliner2-pii", "object": "model"},
     ]
 }
 

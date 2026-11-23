@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
 
-from open_free_router.refresh_sources import nous, sensenova, opencode_zen
+from open_free_router.refresh_sources import nous, sensenova, opencode_zen, openrouter
 
 
 def _mock_response(json_data, status=200):
@@ -128,6 +128,38 @@ class TestSensenova:
         models = sensenova.fetch("https://token.sensenova.cn/v1", api_key="sk-test")
         assert models[0].reasoning is True
 
+    # 2026-11 live schema: /v1/models stopped returning `pricing` entirely
+    # and now exposes businesses + modality lists only. Before this fix the
+    # zero-pricing filter rejected every model (float(None) -> 1), so a
+    # scheduled refresh would have reported "0 free models" forever.
+    NEW_SCHEMA = {
+        "data": [
+            {
+                "id": "glm-5.3",
+                "context_length": 1048576,
+                "max_output_length": 131072,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "businesses": ["tokenplan", "metered"],
+            },
+            {
+                "id": "sensenova-u1.5-lite",
+                "context_length": 262144,
+                "max_output_length": 65536,
+                "input_modalities": ["text"],
+                "output_modalities": ["image"],
+                "businesses": ["tokenplan", "metered"],
+            },
+        ]
+    }
+
+    @patch("requests.get")
+    def test_accepts_text_models_when_pricing_field_is_absent(self, mock_get):
+        mock_get.return_value = _mock_response(self.NEW_SCHEMA)
+        models = sensenova.fetch("https://token.sensenova.cn/v1", api_key="sk-test")
+        assert [m.id for m in models] == ["glm-5.3"]
+        assert models[0].context_window == 1048576
+
 
 class TestOpencodeZen:
     # Adapted from a real (sanitized), unauthenticated response.
@@ -164,3 +196,94 @@ class TestOpencodeZen:
     def test_fetch_failure_returns_empty(self, mock_get):
         mock_get.side_effect = ConnectionError("boom")
         assert opencode_zen.fetch("https://opencode.ai/zen/v1", api_key=None) == []
+
+    # 2026-11 schema: Zen's catalog now carries cost/limit/capabilities.
+    # Free is price==0 (not just the -free suffix), context is real, and
+    # non-chat types (decision/image/embedding) must be excluded.
+    RICH = {
+        "object": "list",
+        "data": [
+            {
+                "id": "beam-free", "type": "chat",
+                "cost": {"text": {"input": {"price": 0}, "output": {"price": 0}}},
+                "limit": {"context": 1048576, "output": 131072},
+                "capabilities": {"reasoning": {"supported": True}},
+                "modalities": {"output": ["text"]},
+            },
+            {
+                "id": "jev-1.13-free", "type": "decision",
+                "cost": {"text": {"input": {"price": 0}, "output": {"price": 0}}},
+                "limit": {"context": 64000, "output": None},
+                "capabilities": {"reasoning": {"supported": False}},
+                "modalities": {"output": ["decision"]},
+            },
+            {
+                "id": "claude-sonnet-5", "type": "chat",
+                "cost": {"text": {"input": {"price": 2}, "output": {"price": 10}}},
+                "limit": {"context": 1000000, "output": 128000},
+                "capabilities": {"reasoning": {"supported": True}},
+                "modalities": {"output": ["text"]},
+            },
+        ],
+    }
+
+    @patch("requests.get")
+    def test_rich_schema_uses_price_and_real_limits(self, mock_get):
+        mock_get.return_value = _mock_response(self.RICH)
+        models = opencode_zen.fetch("https://opencode.ai/zen/v1", api_key=None)
+        assert [m.id for m in models] == ["beam-free"]
+        assert models[0].context_window == 1048576
+        assert models[0].max_tokens == 16384  # clamped from 131072
+        assert models[0].reasoning is True
+
+
+class TestOpenRouterMetadata:
+    SAMPLE = {
+        "data": [
+            {
+                "id": "vendor/free-model:free",
+                "name": "Free Model",
+                "context_length": 1048576,
+                "pricing": {"prompt": "0", "completion": "0"},
+                "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+                "top_provider": {"max_completion_tokens": 131072},
+                "supported_parameters": ["reasoning", "max_tokens", "tools"],
+            },
+        ]
+    }
+
+    @patch("requests.get")
+    def test_max_tokens_from_top_provider_not_context(self, mock_get):
+        mock_get.return_value = _mock_response(self.SAMPLE)
+        models = openrouter.fetch("https://openrouter.ai/api/v1", api_key="sk-test")
+        assert models[0].context_window == 1048576
+        assert models[0].max_tokens == 16384  # clamped, not context_length
+
+    @patch("requests.get")
+    def test_reasoning_from_supported_parameters(self, mock_get):
+        mock_get.return_value = _mock_response(self.SAMPLE)
+        models = openrouter.fetch("https://openrouter.ai/api/v1", api_key="sk-test")
+        assert models[0].reasoning is True
+
+
+class TestNousMetadata:
+    SAMPLE = {
+        "data": [
+            {
+                "id": "org/model:free",
+                "name": "Model",
+                "context_length": 262144,
+                "pricing": {"prompt": "0", "completion": "0"},
+                "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+                "top_provider": {"max_completion_tokens": 65536},
+                "supported_parameters": ["reasoning"],
+            },
+        ]
+    }
+
+    @patch("requests.get")
+    def test_max_tokens_and_reasoning_from_openrouter_shape(self, mock_get):
+        mock_get.return_value = _mock_response(self.SAMPLE)
+        models = nous.fetch("https://inference-api.nousresearch.com/v1", api_key="sk-test")
+        assert models[0].max_tokens == 16384
+        assert models[0].reasoning is True

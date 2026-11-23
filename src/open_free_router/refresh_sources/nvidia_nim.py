@@ -51,6 +51,8 @@ NON_CHAT_KEYWORDS = (
     "cosmos",                           # world/video reasoning models
     "video",                            # synthetic-video-detector etc.
     "ising",                            # calibration research model
+    "starcoder",                        # code-completion-only models
+    "gliner", "pii",                    # NER / PII extraction endpoints
 )
 
 

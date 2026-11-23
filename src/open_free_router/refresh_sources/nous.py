@@ -64,12 +64,19 @@ def fetch(provider_base_url: str, api_key: str | None = None) -> List[ModelInfo]
         if "text" not in output_modalities:
             continue  # skip TTS/ASR/image-only entries
         ctx = m.get("context_length", 131072) or 131072
+        top = m.get("top_provider") or {}
+        max_out = int(top.get("max_completion_tokens") or ctx)
+        reasoning_meta = m.get("reasoning")
+        reasoning = (
+            (isinstance(reasoning_meta, dict) and reasoning_meta.get("default_enabled", False))
+            or "reasoning" in (m.get("supported_parameters") or [])
+        )
         models.append(ModelInfo(
             id=mid,
             name=m.get("name", mid),
             context_window=int(ctx),
-            max_tokens=min(int(ctx), 16384),
-            reasoning=bool((m.get("reasoning") or {}).get("default_enabled", False)),
+            max_tokens=min(max_out, 16384),
+            reasoning=bool(reasoning),
         ))
 
     print(f"  Found {len(models)} free {SOURCE_NAME} models")

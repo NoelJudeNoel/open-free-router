@@ -10,7 +10,8 @@ import yaml
 
 from open_free_router.registry import Registry, ModelInfo, ProviderConfig
 from open_free_router.tiers import (
-    TIERS, TIER_IDS, is_tier_id, tier_members, tier_cascade_pool, UpstreamInstance,
+    TIER_IDS, TIER_NAMES, PROVIDER_PRIORITY, classify_model, is_tier_id,
+    tier_members, tier_cascade_pool, UpstreamInstance,
 )
 from open_free_router.upstream import (
     TierExhaustedError, TierStreamResult, reset_tier_state, _router,
@@ -99,21 +100,79 @@ def test_is_tier_id_false(mid):
     assert not is_tier_id(mid)
 
 
-# tier mapping contents (design spec)
-def test_high_tier_logical_ids():
-    assert TIERS["high"] == ["glm-5.2", "deepseek-v4-flash", "kimi-k3",
-                             "gemini-3.7-flash", "gemini-3.6-flash"]
+# tier classification (family rules + context fallback)
+def test_tier_names():
+    assert TIER_NAMES == ("high", "mid", "low")
 
 
-def test_mid_tier_logical_ids():
-    assert set(TIERS["mid"]) == {
-        "minimax-m3", "laguna-s-2.1", "laguna-xs-2.1",
-        "mimo-v2.5", "deepseek-v4-pro", "nemotron-3-ultra-550b-a55b",
-    }
+@pytest.mark.parametrize("uid,ctx,reasoning,expected", [
+    # high: flagship families
+    ("glm-5.2", 1_048_576, True, "high"),
+    ("glm-5.3-flash", 131_072, False, "high"),
+    ("z-ai/glm-5.3", 1_048_576, True, "high"),
+    ("deepseek-v4-flash", 1_048_576, True, "high"),
+    ("deepseek-ai/deepseek-v4.1-flash", 131_072, False, "high"),
+    ("deepseek-v4-pro", 1_048_576, True, "high"),
+    ("kimi-k3", 1_048_576, True, "high"),
+    ("moonshotai/kimi-k3.1-pro", 262_144, False, "high"),
+    ("gemini-3.7-flash", 1_048_576, True, "high"),
+    ("gemini-3.6-flash", 1_048_576, True, "high"),
+    ("nemotron-3-ultra-550b-a55b", 1_000_000, True, "high"),
+    ("mistral-large-4-1t-a52b", 131_072, False, "high"),
+    ("minimax-m3.1-flash", 131_072, False, "high"),
+    ("step-5-preview", 131_072, False, "high"),
+    # mid: strong generalists
+    ("gemini-3.5-flash-lite", 1_048_576, True, "mid"),
+    ("sensenova-6.8-flash-lite", 262_144, True, "mid"),
+    ("deepseek-flash", 1_048_576, True, "mid"),
+    ("qwen3.8-flash", 131_072, False, "mid"),
+    ("Ling-3.0-flash", 262_144, False, "mid"),
+    ("gpt-oss-20b", 131_072, True, "mid"),
+    ("gpt-oss-120b", 131_072, True, "mid"),
+    ("mimo-v2.6-flash-free", 200_000, True, "mid"),
+    ("nemotron-3.5-lightning-30b-a3b", 131_072, True, "mid"),
+    ("nemotron-3-super", 131_072, True, "mid"),
+    ("laguna-s-2.1", 262_144, True, "mid"),
+    ("laguna-xs-2.1", 262_144, True, "mid"),
+    ("ornith/ornith-1.5-122b:free", 262_144, True, "mid"),
+    ("dots-studio/dots-3-note-preview:free", 512_000, False, "mid"),
+    ("cohere/north-mini-code:free", 256_000, False, "mid"),
+    ("recursive/flint-v1.0:free", 262_144, False, "mid"),
+    ("big-pickle", 200_000, True, "mid"),
+    ("beam-1.0-501b-a23b", 262_144, True, "mid"),
+    # low: small / narrow families, even with a big advertised context
+    ("gemma-4-31b-it", 262_144, False, "low"),
+    ("google/gemma-4-26b-a4b-it:free", 262_144, False, "low"),
+    ("diffusiongemma-26b-a4b-it", 131_072, False, "low"),
+    ("muse-glimmer-30b", 131_072, False, "low"),
+    ("xingchen-agi/xing4.0-29b-a4b:free", 262_144, False, "low"),
+    ("liquid/lfm-3-1.7b:free", 262_144, False, "low"),
+    ("nemotron-3-nano-omni-30b-a3b-reasoning", 131_072, True, "low"),
+    ("nemotron-3.5-bolt-e4b", 131_072, True, "low"),
+])
+def test_classify_model_rules(uid, ctx, reasoning, expected):
+    assert classify_model(uid, ctx, reasoning) == expected
 
 
-def test_low_tier_empty_by_default():
-    assert TIERS["low"] == []
+@pytest.mark.parametrize("ctx,reasoning,expected", [
+    (1_000_000, True, "high"),     # unknown flagship: huge ctx + reasoning
+    (1_000_000, False, "mid"),     # huge ctx but no reasoning signal
+    (262_144, False, "mid"),
+    (131_072, False, "mid"),
+    (64_000, False, "low"),
+    (32_768, True, "low"),
+])
+def test_classify_model_context_fallback(ctx, reasoning, expected):
+    assert classify_model("some-brand-new-model", ctx, reasoning) == expected
+
+
+def test_provider_priority_covers_every_shipped_provider(registry):
+    """A provider missing from PROVIDER_PRIORITY still works (default 50),
+    but every curated provider should have an explicit rank so ordering is
+    intentional rather than accidental."""
+    for name in registry.providers:
+        assert name in PROVIDER_PRIORITY, f"{name} missing from PROVIDER_PRIORITY"
+    assert PROVIDER_PRIORITY["sensenova"] < PROVIDER_PRIORITY["openrouter"]
 
 
 # normalization: :free and -free suffix stripping
@@ -143,16 +202,14 @@ def test_suffix_variants_expand_into_tier_pool(registry):
     The default.yaml template has opencode-zen-free models (with -free
     suffixes) but not Nous models (auto-refreshed); the Nous :free variant
     is tested via the same normalization logic in _normalize()."""
-    # high tier: deepseek-v4-flash should match the opencode-zen-free
-    # variant (deepseek-v4-flash-free) via suffix stripping
+    # high tier: deepseek-v4.1-flash-free should match via suffix stripping
     high = tier_members("high", registry)
     high_keys = {i.key for i in high}
-    assert "opencode-zen-free/deepseek-v4-flash-free" in high_keys, "zen -free variant missing from high -- suffix stripping failed"
-    # mid tier: laguna-s-2.1 should match the opencode-zen-free variant
-    # (laguna-s-2.1-free)
+    assert "opencode-zen-free/deepseek-v4.1-flash-free" in high_keys, "zen -free variant missing from high -- suffix stripping failed"
+    # mid tier: mimo-v2.6-flash-free should match via suffix stripping
     mid = tier_members("mid", registry)
     mid_keys = {i.key for i in mid}
-    assert "opencode-zen-free/laguna-s-2.1-free" in mid_keys, "zen -free variant missing from mid -- suffix stripping failed"
+    assert "opencode-zen-free/mimo-v2.6-flash-free" in mid_keys, "zen -free variant missing from mid -- suffix stripping failed"
     # Before the fix, these -free variants were silently excluded from their
     # tiers and only reachable (out of order) in the low catch-all pool.
 
@@ -161,12 +218,8 @@ def test_suffix_variants_expand_into_tier_pool(registry):
 def test_high_pool_contains_expected_instances(registry):
     pool = tier_members("high", registry)
     keys = {f"{p.provider.name}/{p.model.id}" for p in pool}
-    assert "sensenova/glm-5.2" in keys
-    # 2026-09-02: NIM no longer lists z-ai/glm-5.2, so the high pool's
-    # glm-5.2 instance is sensenova-only now (probe re-checks every cycle).
-    assert "nvidia-nim/glm-5.2" not in keys
-    # kimi-k3 joined the high tier 2026-09-02 (sensenova + NIM instances)
-    assert "nvidia-nim/kimi-k3" in keys
+    assert "sensenova/glm-5.3" in keys
+    assert "nvidia-nim/kimi-k3.1-pro" in keys
     assert "sensenova/deepseek-v4-flash" in keys
     assert "google-ai-studio/gemini-3.6-flash" in keys
 
@@ -174,12 +227,12 @@ def test_high_pool_contains_expected_instances(registry):
 def test_mid_pool_fuzzy_upstream_id_match(registry):
     pool = tier_members("mid", registry)
     keys = {f"{p.provider.name}/{p.model.id}" for p in pool}
-    # "minimax-m3" is nvidia-nim's local id for upstream_id
-    # "minimaxai/minimax-m3" -- this is the "fuzzy" match this test name
-    # refers to: the tier's logical id ("minimax-m3") matches via
-    # _normalize() stripping the "minimaxai/" prefix from the upstream_id,
-    # not via an exact upstream_id string match.
-    assert "nvidia-nim/minimax-m3" in keys
+    # "nemotron-3.5-lightning-30b-a3b" is nvidia-nim's local id for
+    # upstream_id "nvidia/nemotron-3.5-lightning-30b-a3b" -- this is the
+    # "fuzzy" match this test name refers to: classification works on the
+    # upstream_id with its "nvidia/" prefix stripped, not on an exact string
+    # match against the local display id.
+    assert "nvidia-nim/nemotron-3.5-lightning-30b-a3b" in keys
 
 
 def test_connect_prepends_upstream_path_prefix(registry):
@@ -217,7 +270,7 @@ def test_connect_prepends_upstream_path_prefix(registry):
 
     # sensenova upstream_url is https://token.sensenova.cn/v1 -> base /v1
     sensenova = registry.providers["sensenova"]
-    glm_model = next(m for m in sensenova.models if m.id == "glm-5.2")
+    glm_model = next(m for m in sensenova.models if m.id == "glm-5.3")
     inst = UpstreamInstance.for_provider(sensenova, glm_model)
     with patch("open_free_router.upstream.http.client.HTTPSConnection", _NoNetHTTPS):
         with pytest.raises(AssertionError):
@@ -242,8 +295,8 @@ def test_pool_priority_orders_best_first(registry):
     must be attempted before the 128k nvidia-nim one (context tiebreaker)."""
     pool = tier_members("high", registry)
     glm = [p for p in pool
-           if p.model.id == "glm-5.2" or p.upstream_model == "z-ai/glm-5.2"]
-    assert glm, "expected at least one glm-5.2 instance in high tier"
+           if p.model.id == "glm-5.3" or p.upstream_model == "z-ai/glm-5.3"]
+    assert glm, "expected at least one glm-5.3 instance in high tier"
     # the first glm instance should be the largest-context one
     assert glm[0].context_window >= glm[-1].context_window
     assert glm[0].context_window == 1_048_576  # sensenova 1M
@@ -473,27 +526,11 @@ def test_proxy_models_list_includes_tiers():
 
 # ── Regression tests for bugs found in a post-hoc review of this feature ──
 
-def test_instance_priority_actually_orders_when_context_ties(registry):
-    """The bug this guards: _INSTANCE_PRIORITY used to never match
-    anything (tuple field order didn't match how it was destructured at
-    lookup time), so every instance silently got the same default
-    priority and ordering only ever came from the context_window
-    tiebreaker. Construct a registry where two instances of the same
-    logical model have IDENTICAL context_window -- if priority weren't
-    actually working, sort order between them would be arbitrary
-    (whatever order the registry dict happens to iterate in); with a
-    working priority table, the higher-priority provider must come
-    first regardless of dict iteration order."""
-    from open_free_router.tiers import _INSTANCE_PRIORITY, _expand_logical
-
-    # Confirm the priority table itself is populated the way callers expect:
-    # a real (logical_id, provider_name) lookup must NOT hit the 1000
-    # fallback for entries actually listed.
-    assert _INSTANCE_PRIORITY[("glm-5.2", "sensenova")] == 0
-    assert _INSTANCE_PRIORITY[("glm-5.2", "nvidia-nim")] == 1
-
+def test_provider_priority_orders_when_context_ties():
+    """Two providers serving the same model with identical context windows
+    must be ordered by PROVIDER_PRIORITY, not by dict iteration order."""
     reg = Registry({
-        "z-provider": {  # sorts after "sensenova" alphabetically/by-dict-order
+        "z-provider": {  # alphabetically last, unknown to the priority table
             "upstream_url": "https://example.com/v1",
             "models": [{"id": "glm-5.2", "context_window": 999999}],
         },
@@ -502,15 +539,10 @@ def test_instance_priority_actually_orders_when_context_ties(registry):
             "models": [{"id": "glm-5.2", "context_window": 999999}],  # tie
         },
     })
-    results = _expand_logical("glm-5.2", reg)
-    priorities = {provider.name: priority for priority, _key, provider, _model in results}
-    # sensenova is explicitly prioritized; z-provider isn't listed at all
-    # (falls back to 1000) -- sensenova must sort first despite z-provider
-    # having no context_window disadvantage and a "later" provider name.
-    assert priorities["sensenova"] < priorities["z-provider"]
-    ordered_providers = [provider.name for _p, _k, provider, _m in
-                          sorted(results, key=lambda t: (t[0], t[1]))]
-    assert ordered_providers[0] == "sensenova"
+    pool = tier_members("high", reg)
+    providers = [i.provider.name for i in pool]
+    assert providers[0] == "sensenova"
+    assert providers.index("sensenova") < providers.index("z-provider")
 
 
 def test_patch_model_strips_internal_routing_keys():
@@ -574,23 +606,26 @@ def test_forward_tier_streaming_success_returns_closeable_raw_conn():
     fake_conn.close.assert_called_once()
 
 
-def test_every_tier_member_resolves_to_at_least_one_instance(registry):
-    """The bug this guards: TIERS["mid"] used to list "ling-3.0-flash",
-    which matched nothing in the real registry (Zen's actual id has a
-    "-free" suffix; the one manual entry that would have matched under
-    Nous was removed elsewhere as a confirmed-broken mapping) -- a dead
-    tier member that silently shrank the pool with no error or warning.
-    Guards every current tier (except "low", which is a deliberate
-    catch-all with no fixed logical-id list) against this recurring."""
-    from open_free_router.tiers import _expand_logical
+def test_every_shipped_model_lands_in_exactly_one_tier(registry):
+    """The old TIERS lists silently rotted: a delisted logical id matched
+    zero instances and a new model matched nothing at all, so it never
+    appeared in any tier. With rule-based classification every registry
+    model must land in exactly one tier, and every tier must be non-empty.
+    """
+    for tier_name in TIER_NAMES:
+        pool = tier_members(tier_name, registry)
+        keys = [i.key for i in pool]
+        assert len(keys) == len(set(keys)), f"{tier_name} has duplicate instance keys"
+        assert pool, f"tier {tier_name} is empty"
 
-    for tier_name in ("high", "mid"):
-        for logical_id in TIERS[tier_name]:
-            matches = _expand_logical(logical_id, registry)
-            assert matches, (
-                f"TIERS[{tier_name!r}] lists {logical_id!r}, which matches "
-                f"zero instances in registry.default.yaml -- dead tier member"
-            )
+    buckets: dict[str, set[str]] = {t: set() for t in TIER_NAMES}
+    for tier_name in TIER_NAMES:
+        buckets[tier_name] = {i.key for i in tier_members(tier_name, registry)}
+    all_tiered = set().union(*buckets.values())
+    expected = {f"{p.name}/{m.effective_upstream_id}"
+                for p in registry.providers.values() for m in p.models}
+    assert all_tiered == expected, "some models fell outside every tier"
+    assert sum(len(v) for v in buckets.values()) == len(expected), "model in >1 tier"
 
 
 def test_forward_tier_streaming_exhaustion_carries_last_status():
@@ -684,7 +719,7 @@ def test_streaming_success_records_stats():
 def test_tier_status_reflects_stats_and_cooldown(registry):
     from open_free_router.upstream import tier_status
 
-    inst_key = "sensenova/glm-5.2"
+    inst_key = "sensenova/glm-5.3"
     _router.stats.record_success(inst_key)
     _router.stats.record_success(inst_key)
     _router.stats.record_failure(inst_key)

@@ -101,6 +101,33 @@ def _classify(status: int) -> str:
     return INCONCLUSIVE
 
 
+def _error_detail(j) -> str:
+    """Extract a human-readable message from an upstream error body.
+
+    Upstreams disagree on the shape: OpenAI-style ``{"error": {"message": ...}}``,
+    bare-string ``{"error": "rate limited"}`` (OpenRouter/Nous), list
+    ``{"error": [...]}``, or a top-level list. Assuming a dict here used to
+    raise AttributeError and abort the whole refresh cycle.
+    """
+    if isinstance(j, list):
+        first = j[0] if j else ""
+        if isinstance(first, dict):
+            return str(first.get("message") or first.get("detail") or first)
+        return str(first)
+
+    if not isinstance(j, dict):
+        return str(j)
+
+    err = j.get("error")
+    if isinstance(err, dict):
+        return str(err.get("message") or err.get("detail") or err)
+    if isinstance(err, list):
+        return _error_detail(err)
+    if err:
+        return str(err)
+    return str(j.get("message") or j.get("detail") or "")
+
+
 def probe_chat(
     base_url: str,
     api_key: str,
@@ -160,7 +187,7 @@ def probe_chat(
     detail = ""
     try:
         j = r.json()
-        detail = (j.get("error") or {}).get("message", "") if not r.ok else ""
+        detail = _error_detail(j) if not r.ok else ""
     except ValueError:
         detail = r.text[:120]
     return ProbeResult(model=model, status=r.status_code, verdict=verdict,

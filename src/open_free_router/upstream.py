@@ -199,11 +199,11 @@ def tier_status(registry) -> dict[str, list[dict[str, Any]]]:
     /api/status so the dashboard (and anyone curious) can see "how has
     routing actually behaved", not just "what's configured."
     """
-    from open_free_router.tiers import TIERS, tier_members
+    from open_free_router.tiers import TIER_NAMES, tier_members
     stats = _router.stats.snapshot()
     now = time.monotonic()
     result: dict[str, list[dict[str, Any]]] = {}
-    for tier_name in TIERS:
+    for tier_name in TIER_NAMES:
         entries = []
         for inst in tier_members(tier_name, registry):
             s = stats.get(inst.key, {"success": 0, "failure": 0})

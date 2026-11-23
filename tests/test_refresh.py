@@ -142,3 +142,34 @@ def test_verify_false_skips_probe_entirely(monkeypatch):
     results = refresh(reg, provider_name="fake", verify=False)
     assert results["fake"] is True
     assert [m.id for m in reg.get("fake").models] == ["m1", "m2"]
+
+
+def test_one_source_raising_does_not_abort_other_providers(monkeypatch):
+    """A single broken refresh source must not take down the whole cycle.
+
+    Before this guard, any exception from source.fetch() propagated out of
+    refresh(), so one provider's bad response shape skipped every provider
+    after it in the loop -- and in the scheduler that meant a 12h wait
+    before the next attempt.
+    """
+    import open_free_router.refresh as refresh_mod
+
+    def _boom(provider_base_url, api_key):
+        raise RuntimeError("upstream schema changed")
+
+    reg = Registry({
+        "bad": {"upstream_url": "https://bad/v1", "api_key": "k",
+                "models": [{"id": "old"}]},
+        "good": {"upstream_url": "https://good/v1", "api_key": "k",
+                 "models": [{"id": "old"}]},
+    })
+    monkeypatch.setitem(refresh_mod.SOURCE_MAP, "bad", types.SimpleNamespace(fetch=_boom))
+    monkeypatch.setitem(refresh_mod.SOURCE_MAP, "good",
+                        _fake_source([ModelInfo(id="m1")]))
+
+    results = refresh(reg, verify=False)
+
+    assert results["bad"] is False
+    assert [m.id for m in reg.get("bad").models] == ["old"]  # untouched
+    assert results["good"] is True
+    assert [m.id for m in reg.get("good").models] == ["m1"]

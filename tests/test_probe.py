@@ -24,6 +24,7 @@ from open_free_router.registry import ModelInfo
 def _resp(status, json_body=None, text=""):
     r = MagicMock()
     r.status_code = status
+    r.ok = 200 <= status < 400
     if json_body is not None:
         r.json.return_value = json_body
     else:
@@ -110,6 +111,32 @@ class TestProbeChat:
         assert kwargs["headers"]["User-Agent"] == "open-free-router/0.1"
         assert kwargs["json"]["stream"] is False
         assert kwargs["json"]["messages"] == [{"role": "user", "content": "Say pong"}]
+
+
+class TestProbeErrorBodyShapes:
+    """Upstreams don't all return {"error": {"message": ...}}.
+
+    Regression: probe.py assumed `error` was always a dict and crashed with
+    AttributeError on a string error body (OpenRouter/Nous do this), which
+    aborted the entire scheduler refresh cycle -- `scheduler_last_ok`
+    stayed null for days while every 12h cycle died at the same line.
+    """
+
+    @pytest.mark.parametrize("status,body,verdict,needle", [
+        (429, {"error": "rate limited"}, ALIVE, "rate limited"),
+        (503, {"error": {"message": "overloaded"}}, ALIVE, "overloaded"),
+        (404, {"error": ["model not found"]}, DEAD, "model not found"),
+        (500, [{"message": "upstream exploded"}], ALIVE, "upstream exploded"),
+        (502, {"error": {"code": 502}}, ALIVE, ""),
+        (401, {"detail": "bad key"}, AUTH, ""),
+    ])
+    @patch("open_free_router.probe.requests.post")
+    def test_non_dict_error_bodies_do_not_crash(self, mock_post, status, body, verdict, needle):
+        mock_post.return_value = _resp(status, body)
+        res = probe_chat("https://x/v1", "k", "m", timeout=1)
+        assert res.verdict == verdict
+        if needle:
+            assert needle in res.detail
 
 
 def _models(*ids):

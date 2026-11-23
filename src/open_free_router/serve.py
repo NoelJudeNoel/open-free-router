@@ -23,6 +23,11 @@ from open_free_router._instance_guard import (
     InstanceAlreadyRunningError,
 )
 
+# Delay before the scheduler's first (startup) cycle, so the proxy and UI
+# finish binding before we spend minutes probing upstreams. Only applies
+# when the daemon has never completed a cycle in this process.
+SCHEDULER_STARTUP_DELAY_SECONDS = 60.0
+
 
 class Daemon:
     """Runs proxy + UI + scheduler in one process."""
@@ -82,6 +87,17 @@ class Daemon:
 
     def _scheduler(self):
         interval_hours = self.cfg.refresh_interval_hours
+        # Run one cycle shortly after startup instead of waiting a full
+        # interval. A freshly deployed daemon otherwise reports
+        # scheduler_last_ok=null for up to 12h -- indistinguishable from a
+        # scheduler that has been dead the whole time (which is exactly the
+        # state a probe crash left production in for 7 days). The short
+        # delay lets the proxy/UI finish binding before we spend minutes
+        # probing upstreams.
+        if self.scheduler_status["last_ok"] is None:
+            if self._stop.wait(SCHEDULER_STARTUP_DELAY_SECONDS):
+                return
+            self._run_cycle()
         while not self._stop.wait(interval_hours * 3600):
             self._run_cycle()
 

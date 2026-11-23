@@ -4,6 +4,64 @@ All notable changes to open-free-router are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [0.3.2] - 2026-11-24
+
+Bugfix + model-list/tier refresh release. No breaking API changes.
+
+### Fixed
+- **Scheduler crash (P0).** `probe.py` assumed every upstream error body was
+  `{"error": {"message": ...}}`; OpenRouter/Nous and a few others return
+  `"error": "<string>"` or a top-level list, so `probe_chat` raised
+  `AttributeError` and aborted the whole refresh cycle. The scheduler has
+  been dead (scheduler_last_ok = null) since 2026-11-14 — one traceback per
+  12h. Added `_error_detail()` that handles dict/str/list roots. Also
+  isolated each provider in `refresh()` so one broken source can no longer
+  abort the others.
+- **SenseNova source returned 0 models.** Its /v1/models response dropped
+  the `pricing` field and now exposes `businesses` + modality lists;
+  `_is_free()` filtered everything. Now accepts text-output models when
+  pricing is absent.
+- **NIM non-chat models.** Extended `NON_CHAT_KEYWORDS` with `starcoder`,
+  `pii`, `gliner` so PII/NER/code-completion endpoints are no longer
+  imported as chat models.
+- **Tier duplicate instance keys.** `tier_members("low")` compared
+  instance keys against logical ids; a model present under several
+  providers was duplicated. Fixed by de-duplicating on the instance key.
+- **Scheduler first cycle.** A freshly started daemon waited a full
+  interval (12h) before its first refresh, so `scheduler_last_ok` stayed
+  null for half a day after every deploy. Now runs one cycle ~60s after
+  boot.
+
+### Changed
+- **Tier classification is now rule-based.** `tiers.py` no longer ships
+  hand-maintained logical-id lists (`TIERS`) that silently rotted (dead
+  entries, new models landing in nothing). Every registry model is
+  classified by an ordered family-rule table (`TIER_RULES`); uncovered
+  models fall back to context-window thresholds (>=500k + reasoning ->
+  high, >=128k -> mid, else low). Ordering inside a tier is
+  family rank -> provider priority -> context window. `classify_model()`
+  is exported for callers.
+- **Model lists refreshed against live sources (2026-11-24).** NIM
+  13 verified models, Nous 2 (hy4-flash, longcat-2.5), OpenRouter 12,
+  SenseNova 6, OpenCode Zen 10 (still gated by an expired key). Dropped
+  NVIDIA gemma-3 4b/12b (404), Nous solar-mini4 and step-3.7-flash (400),
+  poolside laguna-* (upstream-deactivated). Removed dead providers
+  ant-ling / leuai / groq / bai from the default template and cleared
+  their (unusable) models from the live registry.
+- **Refresh source metadata.** OpenRouter/Nous now read max_tokens from
+  top_provider.max_completion_tokens and reasoning from
+  supported_parameters. OpenCode Zen now parses its rich cost/limit/
+  capabilities schema instead of the -free suffix alone.
+- **Documentation.** AGENTS.md tier-routing description updated to the
+  rule-based model.
+
+### Notes
+- `opencode-zen-free` models still return 401 (expired API key) on this
+  host; the list is kept so replacing the key makes them usable again.
+- google-ai-studio remains geo-blocked (400 FAILED_PRECONDITION) from
+  this host; retained per user request.
+- GitHub Release only (no PyPI) per user decision.
+
 ## [0.3.0] - 2026-09-02
 
 Probe-then-trust release: refresh no longer trusts /v1/models listings

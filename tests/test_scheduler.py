@@ -147,3 +147,47 @@ class TestSchedulerChangeGating:
         mock_rebuild.assert_called_once()
         mock_pi.assert_called_once()
         mock_sync.assert_called_once()
+
+
+class TestSchedulerStartupCycle:
+    """A freshly started daemon must run one cycle shortly after boot.
+
+    Before this, the scheduler slept a full interval (12h by default)
+    before its first cycle, so `scheduler_last_ok` stayed null for half a
+    day on every deploy -- the same observable state as a scheduler that
+    had been dead for days (the production probe crash).
+    """
+
+    def test_first_cycle_runs_before_the_full_interval(self, tmp_path):
+        from open_free_router.serve import SCHEDULER_STARTUP_DELAY_SECONDS
+
+        d = _daemon(tmp_path)
+        waits = []
+
+        def fake_wait(timeout):
+            waits.append(timeout)
+            return len(waits) >= 2  # first wait -> False, then stop
+
+        d._stop.wait = fake_wait
+        with patch.object(d, "_run_cycle") as cycle:
+            d._scheduler()
+
+        cycle.assert_called_once()
+        assert waits[0] == SCHEDULER_STARTUP_DELAY_SECONDS
+        assert waits[1] == 12 * 3600
+
+    def test_no_startup_cycle_when_last_ok_already_set(self, tmp_path):
+        d = _daemon(tmp_path)
+        d.scheduler_status["last_ok"] = "2026-01-01T00:00:00+00:00"
+        waits = []
+
+        def fake_wait(timeout):
+            waits.append(timeout)
+            return True
+
+        d._stop.wait = fake_wait
+        with patch.object(d, "_run_cycle") as cycle:
+            d._scheduler()
+
+        cycle.assert_not_called()
+        assert waits == [12 * 3600]
